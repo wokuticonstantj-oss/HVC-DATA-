@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>HVC Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0a0f1e;font-family:Georgia,serif;color:#e8dcc8;min-height:100vh}
+input,select{outline:none}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:rgba(255,255,255,0.03)}
+::-webkit-scrollbar-thumb{background:rgba(234,179,8,0.3);border-radius:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const GAS_URL = "https://script.google.com/macros/s/AKfycbwZ32pcuSxBn0d61yHTZ8ty_sblFllxdZ99P2Ag3UW4wcwiiVa5OpowWMlAT0EYad7O/exec";
+const CHAIRMAN_PASSWORD = "HVC2024";
+const POLL_INTERVAL = 30000; // auto-refresh every 30 seconds for members
+
+// ── DEFAULT DATA ──────────────────────────────────────────────────────────────
+const DEFAULT_DATA = {
+  org:{ name:"HAREMBE VIEWER'S CORPORATION", abbreviation:"HVC", motto:"Together We Grow", founded:"2024", location:"Uganda", chairmanName:"Wokuti Constant" },
+  members:[
+    {id:1,name:"Bilali Ayub",contribution:55600,role:"Member"},
+    {id:2,name:"Wokuti Constant",contribution:25600,role:"Chairman"},
+    {id:3,name:"Kulisoma Joshua",contribution:5600,role:"Member"},
+    {id:4,name:"Namukose Samali",contribution:5600,role:"Member"},
+    {id:5,name:"Kintu Jamal",contribution:5600,role:"Member"},
+    {id:6,name:"Bashiri Umar",contribution:0,role:"Member"},
+  ],
+  investments:[
+    {id:1,batch:"March Birds",type:"Poultry",description:"Exchanged 1 cock for 4 chicks (2 hens + 2 cocks)",invested:28000,currentValue:48000,notes:"Each bird now worth UGX 12,000",status:"Active",date:"2024-03-01",
+      birds:[{type:"Hen",count:2,costEach:7000,currentEach:12000,alive:true},{type:"Cock",count:2,costEach:7000,currentEach:12000,alive:true}]},
+    {id:2,batch:"April Birds",type:"Poultry",description:"Bought 3 chicks; 1 hen died in rain",invested:30000,currentValue:14000,notes:"1 hen died → loss UGX 10,000. Remaining: 1 hen + 1 cock @ UGX 7,000 each",status:"Active",date:"2024-04-01",
+      birds:[{type:"Hen",count:1,costEach:10000,currentEach:7000,alive:true},{type:"Cock",count:1,costEach:10000,currentEach:7000,alive:true},{type:"Hen (died)",count:1,costEach:10000,currentEach:0,alive:false}]},
+  ],
+  cash:513000,
+  transactions:[
+    {id:1,date:"2024-03-01",description:"March Birds - Initial investment",amount:-28000,type:"Investment"},
+    {id:2,date:"2024-04-01",description:"April Birds - Purchase",amount:-30000,type:"Investment"},
+    {id:3,date:"2024-04-15",description:"April Birds - Hen death loss",amount:-10000,type:"Loss"},
+  ],
+  lastUpdated: new Date().toISOString(),
+};
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const fmt = n => "UGX " + Number(n||0).toLocaleString();
+const totalContributions = members => members.reduce((s,m)=>s+m.contribution,0);
+const shareOf = (member,members) => {
+  const t = totalContributions(members);
+  return t===0 ? 0 : ((member.contribution/t)*100).toFixed(1);
+};
+const safeParseData = (raw) => {
+  try {
+    if(!raw) return DEFAULT_DATA;
+    const p = JSON.parse(raw);
+    if(!p || typeof p !== "object") return DEFAULT_DATA;
+    return {
+      ...DEFAULT_DATA, ...p,
+      org: {...DEFAULT_DATA.org, ...(p.org||{})},
+      members: Array.isArray(p.members) && p.members.length > 0 ? p.members : DEFAULT_DATA.members,
+      investments: Array.isArray(p.investments) ? p.investments : DEFAULT_DATA.investments,
+      transactions: Array.isArray(p.transactions) ? p.transactions : DEFAULT_DATA.transactions,
+      cash: typeof p.cash === "number" ? p.cash : DEFAULT_DATA.cash,
+    };
+  } catch { return DEFAULT_DATA; }
+};
+
+// ── SYNC ENGINE ───────────────────────────────────────────────────────────────
+// Uses a proxy approach: GET loads from GAS, POST saves to GAS via no-cors
+// then immediately re-fetches to confirm save
+const loadFromGAS = async () => {
+  const res = await fetch(GAS_URL + "?t=" + Date.now(), {
+    method: "GET",
+    cache: "no-store",
+  });
+  const json = await res.json();
+  return json;
+};
+
+const saveToGAS = async (data) => {
+  // no-cors POST — GAS will receive it even without CORS headers
+  await fetch(GAS_URL, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify(data),
+  });
+};
+
+// ── EDITABLE FIELD ────────────────────────────────────────────────────────────
+function EditableField({value, onChange, isChairman, type="text", prefix="", style={}}){
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const commit = () => {
+    const f = type==="number" ? parseFloat(draft)||0 : draft;
+    onChange(f);
+    setEditing(false);
+  };
+  if(!isChairman) return <span style={style}>{prefix}{type==="number"?Number(value).toLocaleString():value}</span>;
+  if(editing) return (
+    <input autoFocus type={type} value={draft}
+      onChange={e=>setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape")setEditing(false);}}
+      style={{background:"rgba(234,179,8,0.15)",border:"1px solid #eab308",borderRadius:4,color:"inherit",fontSize:"inherit",fontFamily:"inherit",padding:"2px 6px",width:type==="number"?110:"auto",...style}}/>
+  );
+  return (
+    <span onClick={()=>{setDraft(value);setEditing(true);}} title="Tap to edit"
+      style={{cursor:"pointer",borderBottom:"1px dashed rgba(234,179,8,0.5)",...style}}>
+      {prefix}{type==="number"?Number(value).toLocaleString():value}
+    </span>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+function App(){
+  const [data, setData] = useState(() => safeParseData(localStorage.getItem("hvc_data")));
+  const [tab, setTab] = useState("overview");
+  const [isChairman, setIsChairman] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [pw, setPw] = useState("");
+  const [pwErr, setPwErr] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("⟳ Loading latest data...");
+  const [syncing, setSyncing] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [showAddInv, setShowAddInv] = useState(false);
+  const [showAddTx, setShowAddTx] = useState(false);
+  const [newMember, setNewMember] = useState({name:"",contribution:0,role:"Member"});
+  const [newInv, setNewInv] = useState({batch:"",type:"Poultry",description:"",invested:0,currentValue:0,notes:"",status:"Active",date:new Date().toISOString().split("T")[0],birds:[]});
+  const [newTx, setNewTx] = useState({date:new Date().toISOString().split("T")[0],description:"",amount:0,type:"Income"});
+  const pollRef = useRef(null);
+
+  // ── Persist to localStorage ──
+  useEffect(()=>{ localStorage.setItem("hvc_data", JSON.stringify(data)); }, [data]);
+
+  // ── Load from GAS on mount ──
+  const fetchFromServer = useCallback(async (silent=false) => {
+    if(!silent) setSyncing(true);
+    try {
+      const remote = await loadFromGAS();
+      if(remote && remote.org) {
+        const merged = safeParseData(JSON.stringify(remote));
+        setData(merged);
+        localStorage.setItem("hvc_data", JSON.stringify(merged));
+        setSyncStatus("✓ Live — " + new Date().toLocaleTimeString());
+      }
+    } catch(e) {
+      setSyncStatus("📴 Offline — showing local data");
+    } finally {
+      if(!silent) setSyncing(false);
+    }
+  }, []);
+
+  useEffect(()=>{
+    fetchFromServer(false);
+    // Poll every 30s so members always see latest data
+    pollRef.current = setInterval(()=>fetchFromServer(true), POLL_INTERVAL);
+    return ()=>clearInterval(pollRef.current);
+  }, [fetchFromServer]);
+
+  // ── Save to GAS + update local ──
+  const update = useCallback(updater => {
+    setData(prev => {
+      const next = updater(prev);
+      next.lastUpdated = new Date().toISOString();
+      localStorage.setItem("hvc_data", JSON.stringify(next));
+      setSyncStatus("⟳ Saving...");
+      saveToGAS(next)
+        .then(()=>{
+          setSyncStatus("✓ Saved & synced — " + new Date().toLocaleTimeString());
+        })
+        .catch(()=>{
+          setSyncStatus("⚠️ Save failed — data kept locally");
+        });
+      return next;
+    });
+  }, []);
+
+  // ── Derived values ──
+  const birdsValue = data.investments.reduce((s,i)=>s+i.currentValue,0);
+  const totalAssets = birdsValue + data.cash;
+  const invested = data.investments.reduce((s,i)=>s+i.invested,0);
+  const unrealisedGain = birdsValue - invested;
+  const totalContrib = totalContributions(data.members);
+
+  // ── Styles ──
+  const S = {
+    card:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:20,marginBottom:16},
+    goldCard:{background:"linear-gradient(135deg,rgba(234,179,8,0.12),rgba(234,179,8,0.04))",border:"1px solid rgba(234,179,8,0.25)",borderRadius:12,padding:20,marginBottom:16},
+    label:{fontSize:10,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(232,220,200,0.4)",marginBottom:6},
+    bigVal:{fontSize:24,fontWeight:700,color:"#eab308"},
+    sectionTitle:{fontSize:10,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(234,179,8,0.6)",marginBottom:16,borderLeft:"3px solid #eab308",paddingLeft:10},
+    grid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16},
+    btnGold:{background:"rgba(234,179,8,0.15)",border:"1px solid rgba(234,179,8,0.4)",color:"#eab308",borderRadius:8,padding:"8px 16px",fontSize:12,letterSpacing:"0.06em",cursor:"pointer",fontFamily:"Georgia,serif"},
+    btnRed:{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",color:"#ef4444",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"Georgia,serif"},
+    input:{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"10px 12px",color:"#e8dcc8",fontSize:13,fontFamily:"Georgia,serif",width:"100%",marginBottom:10},
+    select:{background:"#0d1a2e",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"10px 12px",color:"#e8dcc8",fontSize:13,fontFamily:"Georgia,serif",width:"100%",marginBottom:10},
+    overlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16},
+    modal:{background:"#0d1a2e",border:"1px solid rgba(234,179,8,0.3)",borderRadius:16,padding:24,width:"100%",maxWidth:400},
+    editHint:{fontSize:11,color:"rgba(234,179,8,0.6)",background:"rgba(234,179,8,0.06)",border:"1px solid rgba(234,179,8,0.15)",borderRadius:6,padding:"6px 12px",marginBottom:16,display:"block"},
+    table:{width:"100%",borderCollapse:"collapse",fontSize:12},
+    th:{textAlign:"left",padding:"8px 10px",fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",color:"rgba(232,220,200,0.35)",borderBottom:"1px solid rgba(255,255,255,0.06)"},
+    td:{padding:"10px 10px",borderBottom:"1px solid rgba(255,255,255,0.04)",color:"#e8dcc8"},
+  };
+
+  // ════════════════════════════════════════════════════════════
+  // TABS
+  // ════════════════════════════════════════════════════════════
+
+  const Overview = () => (
+    <div>
+      {isChairman && <span style={S.editHint}>✏️ Chairman Mode — tap any text or number to edit</span>}
+      <div style={S.goldCard}>
+        <div style={{fontSize:"clamp(14px,4vw,22px)",fontWeight:700,color:"#eab308",marginBottom:6,textAlign:"center"}}>
+          <EditableField value={data.org.name} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,name:v}}))}/>
+        </div>
+        <div style={{textAlign:"center",fontSize:12,color:"rgba(232,220,200,0.5)",marginBottom:4}}>
+          (<EditableField value={data.org.abbreviation} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,abbreviation:v}}))}/>)
+          &nbsp;·&nbsp;"<EditableField value={data.org.motto} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,motto:v}}))}/>
+          "
+        </div>
+        <div style={{textAlign:"center",fontSize:11,color:"rgba(232,220,200,0.35)",marginTop:6,display:"flex",justifyContent:"center",gap:12,flexWrap:"wrap"}}>
+          <span>📍<EditableField value={data.org.location} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,location:v}}))}/></span>
+          <span>· Est. <EditableField value={data.org.founded} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,founded:v}}))}/></span>
+          <span>· 👑<EditableField value={data.org.chairmanName} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,chairmanName:v}}))}/></span>
+        </div>
+      </div>
+      <div style={S.grid}>
+        {[
+          {label:"Total Assets",val:fmt(totalAssets)},
+          {label:"Cash at Hand",val:fmt(data.cash)},
+          {label:"Birds Value",val:fmt(birdsValue)},
+          {label:"Unrealised Gain",val:(unrealisedGain>=0?"+":"")+fmt(unrealisedGain),color:unrealisedGain>=0?"#22c55e":"#ef4444"},
+          {label:"Total Invested",val:fmt(invested)},
+          {label:"Members",val:data.members.length},
+        ].map((k,i)=>(
+          <div key={i} style={S.card}>
+            <div style={S.label}>{k.label}</div>
+            <div style={{...S.bigVal,fontSize:18,color:k.color||"#eab308"}}>{k.val}</div>
+          </div>
+        ))}
+      </div>
+      <div style={S.card}>
+        <div style={S.sectionTitle}>Member Shares</div>
+        {data.members.map(m=>{
+          const share = parseFloat(shareOf(m,data.members));
+          return(
+            <div key={m.id} style={{marginBottom:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
+                <span style={{fontWeight:600}}>{m.name}</span>
+                <span style={{color:"#eab308",fontSize:12}}>{share}% · {fmt((share/100)*totalAssets)}</span>
+              </div>
+              <div style={{height:5,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
+                <div style={{height:"100%",width:`${share}%`,background:"linear-gradient(90deg,#eab308,#f59e0b)",borderRadius:3,transition:"width 0.5s"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const Financials = () => (
+    <div>
+      {isChairman && <span style={S.editHint}>✏️ Tap cash value or transaction details to edit</span>}
+      <div style={S.grid}>
+        <div style={S.goldCard}>
+          <div style={S.label}>Total Assets</div>
+          <div style={{...S.bigVal,fontSize:18}}>{fmt(totalAssets)}</div>
+        </div>
+        <div style={S.card}>
+          <div style={S.label}>Cash at Hand</div>
+          <div style={{fontSize:18,fontWeight:700,color:"#22c55e"}}>
+            {isChairman
+              ? <EditableField value={data.cash} type="number" prefix="UGX " isChairman={isChairman} onChange={v=>update(d=>({...d,cash:v}))}/>
+              : fmt(data.cash)}
+          </div>
+        </div>
+        <div style={S.card}>
+          <div style={S.label}>Invested (Birds)</div>
+          <div style={{fontSize:18,fontWeight:700}}>{fmt(invested)}</div>
+        </div>
+        <div style={S.card}>
+          <div style={S.label}>Gain / Loss</div>
+          <div style={{fontSize:18,fontWeight:700,color:unrealisedGain>=0?"#22c55e":"#ef4444"}}>
+            {unrealisedGain>=0?"+":""}{fmt(unrealisedGain)}
+          </div>
+        </div>
+      </div>
+      <div style={S.card}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={S.sectionTitle}>Transactions</div>
+          {isChairman && <button style={S.btnGold} onClick={()=>setShowAddTx(true)}>+ Add</button>}
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={S.table}>
+            <thead><tr>
+              <th style={S.th}>Date</th>
+              <th style={S.th}>Description</th>
+              <th style={S.th}>Amount</th>
+              <th style={S.th}>Type</th>
+              {isChairman && <th style={S.th}></th>}
+            </tr></thead>
+            <tbody>
+              {data.transactions.map(tx=>(
+                <tr key={tx.id}>
+                  <td style={S.td}><EditableField value={tx.date} isChairman={isChairman} onChange={v=>update(d=>({...d,transactions:d.transactions.map(t=>t.id===tx.id?{...t,date:v}:t)}))}/></td>
+                  <td style={S.td}><EditableField value={tx.description} isChairman={isChairman} onChange={v=>update(d=>({...d,transactions:d.transactions.map(t=>t.id===tx.id?{...t,description:v}:t)}))}/></td>
+                  <td style={{...S.td,color:tx.amount<0?"#ef4444":"#22c55e",fontWeight:600}}>
+                    {tx.amount<0?"-":"+"}<EditableField value={Math.abs(tx.amount)} type="number" isChairman={isChairman} onChange={v=>update(d=>({...d,transactions:d.transactions.map(t=>t.id===tx.id?{...t,amount:tx.amount<0?-v:v}:t)}))}/>
+                  </td>
+                  <td style={S.td}>
+                    <span style={{fontSize:9,padding:"2px 6px",borderRadius:8,background:tx.type==="Loss"?"rgba(239,68,68,0.1)":tx.type==="Income"?"rgba(34,197,94,0.1)":"rgba(234,179,8,0.1)",color:tx.type==="Loss"?"#ef4444":tx.type==="Income"?"#22c55e":"#eab308"}}>
+                      {tx.type}
+                    </span>
+                  </td>
+                  {isChairman && <td style={S.td}><button style={S.btnRed} onClick={()=>update(d=>({...d,transactions:d.transactions.filter(t=>t.id!==tx.id)}))}>✕</button></td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
+  const Investments = () => (
+    <div>
+      {isChairman && <span style={S.editHint}>✏️ Tap any value to edit bird data, prices, counts</span>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={S.sectionTitle}>Poultry Portfolio</div>
+        {isChairman && <button style={S.btnGold} onClick={()=>setShowAddInv(true)}>+ Add Batch</button>}
+      </div>
+      {data.investments.map(inv=>(
+        <div key={inv.id} style={S.card}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+            <div>
+              <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:4}}>
+                <EditableField value={inv.batch} isChairman={isChairman} onChange={v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,batch:v}:i)}))}/>
+              </div>
+              <div style={{fontSize:11,color:"rgba(232,220,200,0.5)"}}>
+                <EditableField value={inv.description} isChairman={isChairman} onChange={v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,description:v}:i)}))}/>
+              </div>
+            </div>
+            {isChairman && <button style={S.btnRed} onClick={()=>update(d=>({...d,investments:d.investments.filter(i=>i.id!==inv.id)}))}>✕</button>}
+          </div>
+          <div style={S.grid}>
+            {[
+              {label:"Invested",val:inv.invested,edit:v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,invested:v}:i)}))},
+              {label:"Current Value",val:inv.currentValue,color:"#22c55e",edit:v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,currentValue:v}:i)}))},
+            ].map((k,ki)=>(
+              <div key={ki} style={{...S.card,margin:0}}>
+                <div style={S.label}>{k.label}</div>
+                <div style={{fontSize:15,fontWeight:700,color:k.color||"#e8dcc8"}}>
+                  {isChairman
+                    ? <EditableField value={k.val} type="number" prefix="UGX " isChairman={isChairman} onChange={k.edit}/>
+                    : fmt(k.val)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:10,letterSpacing:"0.1em",color:"rgba(232,220,200,0.35)",textTransform:"uppercase",marginBottom:8}}>Birds</div>
+          {inv.birds.map((bird,bi)=>(
+            <div key={bi} style={{display:"flex",gap:8,alignItems:"center",padding:"8px 10px",background:bird.alive?"rgba(255,255,255,0.02)":"rgba(239,68,68,0.05)",borderRadius:6,marginBottom:6,flexWrap:"wrap",opacity:bird.alive?1:0.6}}>
+              <span>{bird.alive?"🐓":"💀"}</span>
+              <span style={{flex:1,fontSize:12}}>
+                <EditableField value={bird.type} isChairman={isChairman} onChange={v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,birds:i.birds.map((b,idx)=>idx===bi?{...b,type:v}:b)}:i)}))}/>
+              </span>
+              <span style={{fontSize:11,color:"rgba(232,220,200,0.5)"}}>
+                ×<EditableField value={bird.count} type="number" isChairman={isChairman} onChange={v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,birds:i.birds.map((b,idx)=>idx===bi?{...b,count:v}:b)}:i)}))}/>
+              </span>
+              <span style={{fontSize:11,color:bird.alive?"#22c55e":"#ef4444"}}>
+                @UGX <EditableField value={bird.currentEach} type="number" isChairman={isChairman} onChange={v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,birds:i.birds.map((b,idx)=>idx===bi?{...b,currentEach:v}:b)}:i)}))}/>
+              </span>
+            </div>
+          ))}
+          <div style={{fontSize:11,color:"rgba(232,220,200,0.4)",fontStyle:"italic",marginTop:8}}>
+            📝 <EditableField value={inv.notes} isChairman={isChairman} onChange={v=>update(d=>({...d,investments:d.investments.map(i=>i.id===inv.id?{...i,notes:v}:i)}))}/>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const Members = () => (
+    <div>
+      {isChairman && <span style={S.editHint}>✏️ Tap names, contributions, roles to edit</span>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+        <div style={S.sectionTitle}>{data.members.length} Members · {fmt(totalContrib)} Total</div>
+        {isChairman && <button style={S.btnGold} onClick={()=>setShowAddMember(true)}>+ Add</button>}
+      </div>
+      {data.members.map(m=>{
+        const share = parseFloat(shareOf(m,data.members));
+        return(
+          <div key={m.id} style={S.card}>
+            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+              <div style={{width:40,height:40,borderRadius:"50%",background:"rgba(234,179,8,0.12)",border:"1px solid rgba(234,179,8,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#eab308",flexShrink:0}}>
+                {m.name.charAt(0)}
+              </div>
+              <div style={{flex:1,minWidth:120}}>
+                <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>
+                  <EditableField value={m.name} isChairman={isChairman} onChange={v=>update(d=>({...d,members:d.members.map(mem=>mem.id===m.id?{...mem,name:v}:mem)}))}/>
+                </div>
+                <div style={{fontSize:10,color:"rgba(234,179,8,0.6)"}}>
+                  <EditableField value={m.role} isChairman={isChairman} onChange={v=>update(d=>({...d,members:d.members.map(mem=>mem.id===m.id?{...mem,role:v}:mem)}))}/>
+                </div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:14,fontWeight:700,color:"#eab308"}}>{share}%</div>
+                <div style={{fontSize:11,color:"rgba(232,220,200,0.5)"}}>
+                  {isChairman
+                    ? <EditableField value={m.contribution} type="number" prefix="UGX " isChairman={isChairman} onChange={v=>update(d=>({...d,members:d.members.map(mem=>mem.id===m.id?{...mem,contribution:v}:mem)}))}/>
+                    : fmt(m.contribution)}
+                </div>
+              </div>
+              {isChairman && <button style={S.btnRed} onClick={()=>update(d=>({...d,members:d.members.filter(mem=>mem.id!==m.id)}))}>✕</button>}
+            </div>
+            <div style={{marginTop:10,height:5,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
+              <div style={{height:"100%",width:`${share}%`,background:"linear-gradient(90deg,#eab308,#f59e0b)",borderRadius:3}}/>
+            </div>
+            <div style={{marginTop:6,fontSize:11,color:"#22c55e",textAlign:"right"}}>
+              Asset value: {fmt((share/100)*totalAssets)}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const Assets = () => (
+    <div>
+      {isChairman && <span style={S.editHint}>✏️ Update cash and asset values directly</span>}
+      <div style={S.grid}>
+        <div style={S.goldCard}>
+          <div style={S.label}>Total Assets</div>
+          <div style={{...S.bigVal,fontSize:20}}>{fmt(totalAssets)}</div>
+        </div>
+        <div style={S.card}>
+          <div style={S.label}>Cash at Hand</div>
+          <div style={{fontSize:20,fontWeight:700,color:"#22c55e"}}>
+            {isChairman
+              ? <EditableField value={data.cash} type="number" prefix="UGX " isChairman={isChairman} onChange={v=>update(d=>({...d,cash:v}))}/>
+              : fmt(data.cash)}
+          </div>
+        </div>
+      </div>
+      <div style={S.card}>
+        <div style={S.sectionTitle}>Asset Breakdown</div>
+        <table style={S.table}>
+          <thead><tr>
+            <th style={S.th}>Asset</th>
+            <th style={S.th}>Invested</th>
+            <th style={S.th}>Value</th>
+            <th style={S.th}>Gain</th>
+          </tr></thead>
+          <tbody>
+            {data.investments.map(inv=>(
+              <tr key={inv.id}>
+                <td style={S.td}>{inv.batch}</td>
+                <td style={S.td}>{fmt(inv.invested)}</td>
+                <td style={{...S.td,color:"#22c55e"}}>{fmt(inv.currentValue)}</td>
+                <td style={{...S.td,color:inv.currentValue>=inv.invested?"#22c55e":"#ef4444",fontWeight:600}}>
+                  {inv.currentValue>=inv.invested?"+":""}{fmt(inv.currentValue-inv.invested)}
+                </td>
+              </tr>
+            ))}
+            <tr style={{background:"rgba(234,179,8,0.05)"}}>
+              <td style={{...S.td,fontWeight:700,color:"#eab308"}}>Cash</td>
+              <td style={S.td}>—</td>
+              <td style={{...S.td,color:"#22c55e",fontWeight:700}}>{fmt(data.cash)}</td>
+              <td style={S.td}>—</td>
+            </tr>
+            <tr style={{background:"rgba(234,179,8,0.08)"}}>
+              <td style={{...S.td,fontWeight:700,color:"#eab308",borderTop:"1px solid rgba(234,179,8,0.2)"}}>TOTAL</td>
+              <td style={{...S.td,fontWeight:700,borderTop:"1px solid rgba(234,179,8,0.2)"}}>{fmt(invested)}</td>
+              <td style={{...S.td,color:"#22c55e",fontWeight:700,borderTop:"1px solid rgba(234,179,8,0.2)"}}>{fmt(totalAssets)}</td>
+              <td style={{...S.td,color:unrealisedGain>=0?"#22c55e":"#ef4444",fontWeight:700,borderTop:"1px solid rgba(234,179,8,0.2)"}}>
+                {unrealisedGain>=0?"+":""}{fmt(unrealisedGain)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div style={S.card}>
+        <div style={S.sectionTitle}>Member Allocations</div>
+        <table style={S.table}>
+          <thead><tr>
+            <th style={S.th}>Member</th>
+            <th style={S.th}>Share</th>
+            <th style={S.th}>Cash Portion</th>
+            <th style={S.th}>Total Value</th>
+          </tr></thead>
+          <tbody>
+            {data.members.map(m=>{
+              const share = parseFloat(shareOf(m,data.members))/100;
+              return(
+                <tr key={m.id}>
+                  <td style={S.td}>{m.name}</td>
+                  <td style={{...S.td,color:"#eab308"}}>{(share*100).toFixed(1)}%</td>
+                  <td style={S.td}>{fmt(data.cash*share)}</td>
+                  <td style={{...S.td,color:"#22c55e",fontWeight:600}}>{fmt(totalAssets*share)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
+  const tabs = [
+    {id:"overview",label:"Overview",icon:"◈"},
+    {id:"financials",label:"Financials",icon:"₿"},
+    {id:"investments",label:"Birds",icon:"🐓"},
+    {id:"members",label:"Members",icon:"👥"},
+    {id:"assets",label:"Assets",icon:"🏦"},
+  ];
+
+  const renderTab = () => {
+    switch(tab){
+      case "overview": return <Overview/>;
+      case "financials": return <Financials/>;
+      case "investments": return <Investments/>;
+      case "members": return <Members/>;
+      case "assets": return <Assets/>;
+      default: return <Overview/>;
+    }
+  };
+
+  // ════════════════════════════════════════════════════════════
+  // RENDER
+  // ════════════════════════════════════════════════════════════
+  return(
+    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0a0f1e 0%,#0d1a2e 50%,#0a1628 100%)"}}>
+
+      {/* HEADER */}
+      <div style={{borderBottom:"1px solid rgba(234,179,8,0.2)",background:"rgba(10,15,30,0.95)",backdropFilter:"blur(20px)",position:"sticky",top:0,zIndex:50}}>
+        <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontSize:"clamp(13px,3.5vw,18px)",fontWeight:700,color:"#eab308",letterSpacing:"0.06em"}}>{data.org.abbreviation} Dashboard</div>
+            <div style={{fontSize:10,color:"rgba(232,220,200,0.35)",letterSpacing:"0.1em"}}>{data.org.motto}</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:10,color:syncStatus.startsWith("✓")?"#22c55e":syncStatus.startsWith("⚠️")?"#ef4444":"rgba(232,220,200,0.4)"}}>
+              {syncStatus}
+            </span>
+            {isChairman
+              ? <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  <span style={{fontSize:10,padding:"4px 10px",borderRadius:12,background:"rgba(234,179,8,0.1)",color:"#eab308",border:"1px solid rgba(234,179,8,0.3)"}}>👑 Chairman</span>
+                  <button style={S.btnRed} onClick={()=>setIsChairman(false)}>Lock</button>
+                </div>
+              : <button style={S.btnGold} onClick={()=>setShowLogin(true)}>🔐 Login</button>
+            }
+          </div>
+        </div>
+        {/* NAV TABS */}
+        <div style={{display:"flex",overflowX:"auto",borderTop:"1px solid rgba(255,255,255,0.05)",padding:"0 8px"}}>
+          {tabs.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              style={{padding:"10px 14px",border:"none",background:"transparent",color:tab===t.id?"#eab308":"rgba(232,220,200,0.4)",fontSize:11,letterSpacing:"0.05em",cursor:"pointer",borderBottom:tab===t.id?"2px solid #eab308":"2px solid transparent",whiteSpace:"nowrap",fontFamily:"Georgia,serif",transition:"all 0.2s"}}>
+              {t.icon} {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* PAGE CONTENT */}
+      <div style={{padding:"16px",maxWidth:800,margin:"0 auto"}}>
+        {renderTab()}
+      </div>
+
+      {/* FOOTER */}
+      <div style={{textAlign:"center",padding:"16px",fontSize:10,color:"rgba(232,220,200,0.2)",letterSpacing:"0.08em"}}>
+        {data.org.name} · Updated {new Date(data.lastUpdated).toLocaleString()}
+      </div>
+
+      {/* ── LOGIN MODAL ── */}
+      {showLogin && (
+        <div style={S.overlay} onClick={()=>setShowLogin(false)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:18,fontWeight:700,color:"#eab308",marginBottom:6}}>👑 Chairman Login</div>
+            <div style={{fontSize:12,color:"rgba(232,220,200,0.4)",marginBottom:16}}>Enter password to unlock edit mode</div>
+            <input type="password" placeholder="Password" value={pw}
+              onChange={e=>{setPw(e.target.value);setPwErr(false);}}
+              onKeyDown={e=>{if(e.key==="Enter"){if(pw===CHAIRMAN_PASSWORD){setIsChairman(true);setShowLogin(false);setPw("");}else setPwErr(true);}}}
+              style={{...S.input,border:pwErr?"1px solid #ef4444":"1px solid rgba(255,255,255,0.1)"}}/>
+            {pwErr && <div style={{color:"#ef4444",fontSize:12,marginBottom:8}}>Wrong password</div>}
+            <div style={{display:"flex",gap:8}}>
+              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{if(pw===CHAIRMAN_PASSWORD){setIsChairman(true);setShowLogin(false);setPw("");}else setPwErr(true);}}>Unlock</button>
+              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowLogin(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADD MEMBER MODAL ── */}
+      {showAddMember && (
+        <div style={S.overlay} onClick={()=>setShowAddMember(false)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:16}}>+ Add Member</div>
+            <input placeholder="Full Name" value={newMember.name} onChange={e=>setNewMember(p=>({...p,name:e.target.value}))} style={S.input}/>
+            <input type="number" placeholder="Contribution (UGX)" value={newMember.contribution} onChange={e=>setNewMember(p=>({...p,contribution:parseFloat(e.target.value)||0}))} style={S.input}/>
+            <input placeholder="Role" value={newMember.role} onChange={e=>setNewMember(p=>({...p,role:e.target.value}))} style={S.input}/>
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{update(d=>({...d,members:[...d.members,{...newMember,id:Date.now()}]}));setNewMember({name:"",contribution:0,role:"Member"});setShowAddMember(false);}}>Add</button>
+              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowAddMember(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADD INVESTMENT MODAL ── */}
+      {showAddInv && (
+        <div style={S.overlay} onClick={()=>setShowAddInv(false)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:16}}>+ Add Investment Batch</div>
+            {[["Batch Name","batch","text"],["Type","type","text"],["Description","description","text"],["Invested (UGX)","invested","number"],["Current Value (UGX)","currentValue","number"],["Notes","notes","text"],["Date","date","date"]].map(([label,key,type])=>(
+              <input key={key} type={type} placeholder={label} value={newInv[key]}
+                onChange={e=>setNewInv(p=>({...p,[key]:type==="number"?parseFloat(e.target.value)||0:e.target.value}))}
+                style={S.input}/>
+            ))}
+            <div style={{display:"flex",gap:8}}>
+              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{update(d=>({...d,investments:[...d.investments,{...newInv,id:Date.now(),birds:[]}]}));setShowAddInv(false);}}>Add</button>
+              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowAddInv(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ADD TRANSACTION MODAL ── */}
+      {showAddTx && (
+        <div style={S.overlay} onClick={()=>setShowAddTx(false)}>
+          <div style={S.modal} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:16}}>+ Add Transaction</div>
+            <input type="date" value={newTx.date} onChange={e=>setNewTx(p=>({...p,date:e.target.value}))} style={S.input}/>
+            <input placeholder="Description" value={newTx.description} onChange={e=>setNewTx(p=>({...p,description:e.target.value}))} style={S.input}/>
+            <input type="number" placeholder="Amount (negative = expense)" value={newTx.amount} onChange={e=>setNewTx(p=>({...p,amount:parseFloat(e.target.value)||0}))} style={S.input}/>
+            <select value={newTx.type} onChange={e=>setNewTx(p=>({...p,type:e.target.value}))} style={S.select}>
+              {["Income","Investment","Loss","Expense","Withdrawal"].map(t=><option key={t}>{t}</option>)}
+            </select>
+            <div style={{display:"flex",gap:8}}>
+              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{update(d=>({...d,transactions:[...d.transactions,{...newTx,id:Date.now()}]}));setShowAddTx(false);}}>Add</button>
+              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowAddTx(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
