@@ -1,747 +1,642 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>HVC Dashboard</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HVC — Harembe Viewer's Corporation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#0a0f1e;font-family:Georgia,serif;color:#e8dcc8;min-height:100vh}
-input,select{outline:none}
-::-webkit-scrollbar{width:4px;height:4px}
-::-webkit-scrollbar-track{background:rgba(255,255,255,0.03)}
-::-webkit-scrollbar-thumb{background:rgba(234,179,8,0.3);border-radius:2px}
+  :root{
+    --ink:#16332B;
+    --ink-soft:#2A4A3D;
+    --paper:#F6F4EA;
+    --paper-card:#FFFFFF;
+    --gold:#B8892E;
+    --gold-soft:#EFE0BE;
+    --rust:#8B5E34;
+    --danger:#B3452C;
+    --success:#3F7D5C;
+    --line:#E1DCC9;
+    --text:#1C2B22;
+    --text-muted:#5B6B60;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--text);font-family:'Inter',sans-serif;}
+  .display{font-family:'Fraunces',serif;}
+  .mono{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums;}
+  #root{min-height:100vh;}
+  .app-shell{display:flex;min-height:100vh;}
+  .sidebar{width:220px;background:var(--ink);color:#F0EBD8;flex-shrink:0;display:flex;flex-direction:column;padding:24px 0;}
+  .brand{padding:0 20px 20px;border-bottom:1px solid rgba(240,235,216,0.15);margin-bottom:12px;}
+  .brand-title{font-family:'Fraunces',serif;font-weight:600;font-size:20px;letter-spacing:0.01em;line-height:1.2;}
+  .brand-sub{font-size:11px;color:#B7C4BA;margin-top:4px;letter-spacing:0.04em;text-transform:uppercase;}
+  .nav-item{padding:12px 20px;font-size:14px;font-weight:500;cursor:pointer;color:#CFE0D3;border-left:3px solid transparent;transition:background .15s;}
+  .nav-item:hover{background:rgba(255,255,255,0.06);}
+  .nav-item.active{background:rgba(255,255,255,0.09);border-left-color:var(--gold);color:#fff;}
+  .main{flex:1;padding:28px 32px;max-width:1100px;}
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;}
+  .page-title{font-family:'Fraunces',serif;font-size:28px;font-weight:600;margin:0;}
+  .who{font-size:13px;color:var(--text-muted);}
+  .who select{font-family:inherit;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:#fff;}
+  .card{background:var(--paper-card);border:1px solid var(--line);border-radius:10px;padding:20px;margin-bottom:16px;}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:20px;}
+  .stat-label{font-size:12px;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:6px;}
+  .stat-value{font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:600;color:var(--ink);}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);border-bottom:1px solid var(--line);padding:8px 10px;}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);}
+  tr:last-child td{border-bottom:none;}
+  .amount{font-family:'IBM Plex Mono',monospace;font-weight:600;}
+  .amount.pos{color:var(--success);}
+  .amount.neg{color:var(--danger);}
+  .stamp{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;padding:3px 8px;border-radius:3px;border:1.5px solid currentColor;transform:rotate(-3deg);text-transform:uppercase;}
+  .stamp.Verified{color:var(--success);}
+  .stamp.Pending{color:var(--gold);}
+  .stamp.Disputed{color:var(--danger);}
+  .stamp.New{color:var(--rust);}
+  .stamp.Planned{color:var(--gold);}
+  .stamp.Done{color:var(--success);}
+  .stamp.Rejected{color:var(--danger);}
+  .btn{font-family:'Inter',sans-serif;font-weight:600;font-size:13px;padding:9px 16px;border-radius:7px;border:none;cursor:pointer;background:var(--ink);color:#fff;}
+  .btn:hover{background:var(--ink-soft);}
+  .btn.gold{background:var(--gold);}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--text);}
+  .btn:disabled{opacity:0.5;cursor:not-allowed;}
+  input,select,textarea{font-family:'Inter',sans-serif;font-size:13.5px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;width:100%;background:#fff;color:var(--text);}
+  label{font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;display:block;}
+  .field{margin-bottom:12px;}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .section-title{font-family:'Fraunces',serif;font-size:16px;font-weight:600;margin:0 0 12px;}
+  .owner-lock{background:var(--gold-soft);border:1px solid var(--gold);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;}
+  .badge-role{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:2px 7px;border-radius:4px;background:var(--gold-soft);color:var(--rust);}
+  .empty{color:var(--text-muted);font-size:13px;padding:16px 0;text-align:center;}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:50;}
+  .toast.error{background:var(--danger);}
 </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useCallback, useRef } = React;
+const { useState, useEffect, useCallback, useMemo } = React;
 
-// ── CONFIG ────────────────────────────────────────────────────────────────────
-const GAS_URL = "https://script.google.com/macros/s/AKfycbwZ32pcuSxBn0d61yHTZ8ty_sblFllxdZ99P2Ag3UW4wcwiiVa5OpowWMlAT0EYad7O/exec";
-const CHAIRMAN_PASSWORD = "HVC2024";
-const POLL_INTERVAL = 30000; // auto-refresh every 30 seconds for members
+// =========================================================================
+// CONFIGURE THIS: your deployed Apps Script Web App URL (ends in /exec)
+// =========================================================================
+const GAS_URL = "https://script.google.com/macros/s/AKfycbxeBkVesEqqiWbysuit8OQxXkPV7ifUAaUMTRXRoi8oix_EMDhLmWae3IRcpZxcGNM_Zg/exec";
 
-// ── DEFAULT DATA ──────────────────────────────────────────────────────────────
-const DEFAULT_DATA = {
-  org:{ name:"HAREMBE VIEWER'S CORPORATION", abbreviation:"HVC", motto:"Together We Grow", founded:"2024", location:"Uganda", chairmanName:"Wokuti Constant" },
-  members:[
-    {id:1,name:"Bilali Ayub",contribution:55600,role:"Member"},
-    {id:2,name:"Wokuti Constant",contribution:25600,role:"Chairman"},
-    {id:3,name:"Kulisoma Joshua",contribution:5600,role:"Member"},
-    {id:4,name:"Namukose Samali",contribution:5600,role:"Member"},
-    {id:5,name:"Kintu Jamal",contribution:5600,role:"Member"},
-    {id:6,name:"Bashiri Umar",contribution:0,role:"Member"},
-  ],
-  investments:[
-    {id:1,batch:"March Birds",type:"Poultry",description:"Exchanged 1 cock for 4 chicks (2 hens + 2 cocks)",invested:28000,currentValue:48000,notes:"Each bird now worth UGX 12,000",status:"Active",date:"2024-03-01",
-      birds:[{type:"Hen",count:2,costEach:7000,currentEach:12000,alive:true},{type:"Cock",count:2,costEach:7000,currentEach:12000,alive:true}]},
-    {id:2,batch:"April Birds",type:"Poultry",description:"Bought 3 chicks; 1 hen died in rain",invested:30000,currentValue:14000,notes:"1 hen died → loss UGX 10,000. Remaining: 1 hen + 1 cock @ UGX 7,000 each",status:"Active",date:"2024-04-01",
-      birds:[{type:"Hen",count:1,costEach:10000,currentEach:7000,alive:true},{type:"Cock",count:1,costEach:10000,currentEach:7000,alive:true},{type:"Hen (died)",count:1,costEach:10000,currentEach:0,alive:false}]},
-  ],
-  cash:513000,
-  transactions:[
-    {id:1,date:"2024-03-01",description:"March Birds - Initial investment",amount:-28000,type:"Investment"},
-    {id:2,date:"2024-04-01",description:"April Birds - Purchase",amount:-30000,type:"Investment"},
-    {id:3,date:"2024-04-15",description:"April Birds - Hen death loss",amount:-10000,type:"Loss"},
-  ],
-  monthlySnapshots:[],
-  lastUpdated: new Date().toISOString(),
-};
+function fmtUgx(n) {
+  const v = Number(n) || 0;
+  return "UGX " + v.toLocaleString("en-UG");
+}
 
-// ── HELPERS ───────────────────────────────────────────────────────────────────
-const fmt = n => "UGX " + Number(n||0).toLocaleString();
-const totalContributions = members => members.reduce((s,m)=>s+m.contribution,0);
-const shareOf = (member,members) => {
-  const t = totalContributions(members);
-  return t===0 ? 0 : ((member.contribution/t)*100).toFixed(1);
-};
-const currentMonthKey = () => new Date().toISOString().slice(0,7); // "YYYY-MM"
-const monthLabel = (key) => {
-  const [y,m] = key.split("-");
-  return new Date(parseInt(y), parseInt(m)-1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
-};
-const safeParseData = (raw) => {
-  try {
-    if(!raw) return DEFAULT_DATA;
-    const p = JSON.parse(raw);
-    if(!p || typeof p !== "object") return DEFAULT_DATA;
-    return {
-      ...DEFAULT_DATA, ...p,
-      org: {...DEFAULT_DATA.org, ...(p.org||{})},
-      members: Array.isArray(p.members) && p.members.length > 0 ? p.members : DEFAULT_DATA.members,
-      investments: Array.isArray(p.investments) ? p.investments : DEFAULT_DATA.investments,
-      transactions: Array.isArray(p.transactions) ? p.transactions : DEFAULT_DATA.transactions,
-      monthlySnapshots: Array.isArray(p.monthlySnapshots) ? p.monthlySnapshots : DEFAULT_DATA.monthlySnapshots,
-      cash: typeof p.cash === "number" ? p.cash : DEFAULT_DATA.cash,
-    };
-  } catch { return DEFAULT_DATA; }
-};
-
-// ── SYNC ENGINE ───────────────────────────────────────────────────────────────
-const loadFromGAS = async () => {
-  const res = await fetch(GAS_URL + "?t=" + Date.now(), {
-    method: "GET",
-    cache: "no-store",
-  });
-  const json = await res.json();
-  return json;
-};
-
-const saveToGAS = async (data) => {
-  await fetch(GAS_URL, {
+async function callApi(payload) {
+  const res = await fetch(GAS_URL, {
     method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "text/plain" },
-    body: JSON.stringify(data),
+    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight against Apps Script
+    body: JSON.stringify(payload)
   });
-};
-
-// ── EDITABLE FIELD ────────────────────────────────────────────────────────────
-function EditableField({value, onChange, isChairman, type="text", prefix="", style={}}){
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const commit = () => {
-    const f = type==="number" ? parseFloat(draft)||0 : draft;
-    onChange(f);
-    setEditing(false);
-  };
-  if(!isChairman) return <span style={style}>{prefix}{type==="number"?Number(value).toLocaleString():value}</span>;
-  if(editing) return (
-    <input autoFocus type={type} value={draft}
-      onChange={e=>setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape")setEditing(false);}}
-      style={{background:"rgba(234,179,8,0.15)",border:"1px solid #eab308",borderRadius:4,color:"inherit",fontSize:"inherit",fontFamily:"inherit",padding:"2px 6px",width:type==="number"?110:"auto",...style}}/>
-  );
-  return (
-    <span onClick={()=>{setDraft(value);setEditing(true);}} title="Tap to edit"
-      style={{cursor:"pointer",borderBottom:"1px dashed rgba(234,179,8,0.5)",...style}}>
-      {prefix}{type==="number"?Number(value).toLocaleString():value}
-    </span>
-  );
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
 }
 
-// ── SIMPLE BAR CHART (no external libs, pure div-based) ──────────────────────
-function MiniBarChart({data, labelKey, valueKey, color="#eab308", height=140}){
-  if(!data || data.length===0) return <div style={{fontSize:12,color:"rgba(232,220,200,0.35)",textAlign:"center",padding:20}}>No data yet</div>;
-  const max = Math.max(...data.map(d=>Math.abs(d[valueKey])), 1);
-  return (
-    <div style={{display:"flex",alignItems:"flex-end",gap:8,height,padding:"8px 4px",overflowX:"auto"}}>
-      {data.map((d,i)=>{
-        const h = Math.max((Math.abs(d[valueKey])/max)*(height-30),2);
-        const isNeg = d[valueKey] < 0;
-        return (
-          <div key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:44,flexShrink:0}}>
-            <div style={{fontSize:9,color:"rgba(232,220,200,0.5)",marginBottom:4,whiteSpace:"nowrap"}}>
-              {d[valueKey]>=0?"":"-"}{(Math.abs(d[valueKey])/1000).toFixed(0)}k
-            </div>
-            <div style={{width:26,height:h,background:isNeg?"linear-gradient(180deg,#ef4444,#dc2626)":`linear-gradient(180deg,${color},#f59e0b)`,borderRadius:"4px 4px 0 0",transition:"height 0.4s"}}/>
-            <div style={{fontSize:8,color:"rgba(232,220,200,0.4)",marginTop:6,whiteSpace:"nowrap",textAlign:"center"}}>{d[labelKey]}</div>
-          </div>
-        );
-      })}
-    </div>
-  );
+async function fetchAll() {
+  const res = await fetch(GAS_URL);
+  return res.json();
 }
 
-// ── MAIN APP ──────────────────────────────────────────────────────────────────
-function App(){
-  const [data, setData] = useState(() => safeParseData(localStorage.getItem("hvc_data")));
-  const [tab, setTab] = useState("overview");
-  const [isChairman, setIsChairman] = useState(false);
-  const [showLogin, setShowLogin] = useState(false);
-  const [pw, setPw] = useState("");
-  const [pwErr, setPwErr] = useState(false);
-  const [syncStatus, setSyncStatus] = useState("⟳ Loading latest data...");
-  const [syncing, setSyncing] = useState(false);
-  const [showAddMember, setShowAddMember] = useState(false);
-  const [showAddInv, setShowAddInv] = useState(false);
-  const [showAddTx, setShowAddTx] = useState(false);
-  const [showRecordMonth, setShowRecordMonth] = useState(false);
-  const [selectedBatchId, setSelectedBatchId] = useState(null);
-  const [newMember, setNewMember] = useState({name:"",contribution:0,role:"Member"});
-  const [newInv, setNewInv] = useState({batch:"",type:"Poultry",description:"",invested:0,currentValue:0,notes:"",status:"Active",date:new Date().toISOString().split("T")[0],birds:[]});
-  const [newTx, setNewTx] = useState({date:new Date().toISOString().split("T")[0],description:"",amount:0,type:"Income"});
-  const pollRef = useRef(null);
+function useToast() {
+  const [toast, setToast] = useState(null);
+  const show = useCallback((message, isError) => {
+    setToast({ message, isError });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+  return [toast, show];
+}
 
-  // ── Persist to localStorage ──
-  useEffect(()=>{ localStorage.setItem("hvc_data", JSON.stringify(data)); }, [data]);
+function App() {
+  const [data, setData] = useState(null);
+  const [view, setView] = useState("overview");
+  const [me, setMe] = useState(() => localStorage.getItem("hvc_me") || "");
+  const [ownerPassword, setOwnerPassword] = useState(() => sessionStorage.getItem("hvc_owner_pw") || "");
+  const [toast, showToast] = useToast();
+  const [loading, setLoading] = useState(true);
 
-  // ── Load from GAS on mount ──
-  const fetchFromServer = useCallback(async (silent=false) => {
-    if(!silent) setSyncing(true);
+  const refresh = useCallback(() => {
+    fetchAll().then(d => { setData(d); setLoading(false); }).catch(e => showToast(String(e), true));
+  }, [showToast]);
+
+  useEffect(() => { refresh(); const t = setInterval(refresh, 30000); return () => clearInterval(t); }, [refresh]);
+  useEffect(() => { localStorage.setItem("hvc_me", me); }, [me]);
+  useEffect(() => { sessionStorage.setItem("hvc_owner_pw", ownerPassword); }, [ownerPassword]);
+
+  const isOwner = !!ownerPassword; // verified server-side on every owner action, this just tracks "entered"
+
+  const doAction = async (payload) => {
     try {
-      const remote = await loadFromGAS();
-      if(remote && remote.org) {
-        const merged = safeParseData(JSON.stringify(remote));
-        setData(merged);
-        localStorage.setItem("hvc_data", JSON.stringify(merged));
-        setSyncStatus("✓ Live — " + new Date().toLocaleTimeString());
-      }
-    } catch(e) {
-      setSyncStatus("📴 Offline — showing local data");
-    } finally {
-      if(!silent) setSyncing(false);
+      const res = await callApi(payload);
+      refresh();
+      showToast("Saved.");
+      return res;
+    } catch (e) {
+      showToast(String(e.message || e), true);
+      throw e;
     }
-  }, []);
-
-  useEffect(()=>{
-    fetchFromServer(false);
-    pollRef.current = setInterval(()=>fetchFromServer(true), POLL_INTERVAL);
-    return ()=>clearInterval(pollRef.current);
-  }, [fetchFromServer]);
-
-  // ── Save to GAS + update local ──
-  const update = useCallback(updater => {
-    setData(prev => {
-      const next = updater(prev);
-      next.lastUpdated = new Date().toISOString();
-      localStorage.setItem("hvc_data", JSON.stringify(next));
-      setSyncStatus("⟳ Saving...");
-      saveToGAS(next)
-        .then(()=>{
-          setSyncStatus("✓ Saved & synced — " + new Date().toLocaleTimeString());
-        })
-        .catch(()=>{
-          setSyncStatus("⚠️ Save failed — data kept locally");
-        });
-      return next;
-    });
-  }, []);
-
-  // ── Derived values ──
-  const birdsValue = data.investments.reduce((s,i)=>s+i.currentValue,0);
-  const totalAssets = birdsValue + data.cash;
-  const invested = data.investments.reduce((s,i)=>s+i.invested,0);
-  const unrealisedGain = birdsValue - invested;
-  const totalContrib = totalContributions(data.members);
-
-  // ── Monthly snapshot logic ──
-  const thisMonthKey = currentMonthKey();
-  const hasSnapshotThisMonth = data.monthlySnapshots.some(s=>s.month===thisMonthKey);
-  const sortedSnapshots = [...data.monthlySnapshots].sort((a,b)=>a.month.localeCompare(b.month));
-  const lastSnapshot = sortedSnapshots.length>0 ? sortedSnapshots[sortedSnapshots.length-1] : null;
-
-  const recordMonth = () => {
-    const snapshot = {
-      month: thisMonthKey,
-      recordedAt: new Date().toISOString(),
-      totalAssets, cash: data.cash, birdsValue, invested,
-      memberContributions: data.members.map(m=>({id:m.id,name:m.name,contribution:m.contribution})),
-      batchValues: data.investments.map(i=>({batchId:i.id,batch:i.batch,invested:i.invested,currentValue:i.currentValue,status:i.status})),
-    };
-    update(d=>({...d, monthlySnapshots:[...d.monthlySnapshots.filter(s=>s.month!==thisMonthKey), snapshot]}));
-    setShowRecordMonth(false);
   };
 
-  // ── Styles ──
-  const S = {
-    card:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:20,marginBottom:16},
-    goldCard:{background:"linear-gradient(135deg,rgba(234,179,8,0.12),rgba(234,179,8,0.04))",border:"1px solid rgba(234,179,8,0.25)",borderRadius:12,padding:20,marginBottom:16},
-    label:{fontSize:10,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(232,220,200,0.4)",marginBottom:6},
-    bigVal:{fontSize:24,fontWeight:700,color:"#eab308"},
-    sectionTitle:{fontSize:10,letterSpacing:"0.2em",textTransform:"uppercase",color:"rgba(234,179,8,0.6)",marginBottom:16,borderLeft:"3px solid #eab308",paddingLeft:10},
-    grid:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16},
-    btnGold:{background:"rgba(234,179,8,0.15)",border:"1px solid rgba(234,179,8,0.4)",color:"#eab308",borderRadius:8,padding:"8px 16px",fontSize:12,letterSpacing:"0.06em",cursor:"pointer",fontFamily:"Georgia,serif"},
-    btnRed:{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",color:"#ef4444",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"Georgia,serif"},
-    btnGreen:{background:"rgba(34,197,94,0.12)",border:"1px solid rgba(34,197,94,0.4)",color:"#22c55e",borderRadius:8,padding:"8px 16px",fontSize:12,letterSpacing:"0.06em",cursor:"pointer",fontFamily:"Georgia,serif"},
-    input:{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"10px 12px",color:"#e8dcc8",fontSize:13,fontFamily:"Georgia,serif",width:"100%",marginBottom:10},
-    select:{background:"#0d1a2e",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"10px 12px",color:"#e8dcc8",fontSize:13,fontFamily:"Georgia,serif",width:"100%",marginBottom:10},
-    overlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:16},
-    modal:{background:"#0d1a2e",border:"1px solid rgba(234,179,8,0.3)",borderRadius:16,padding:24,width:"100%",maxWidth:400,maxHeight:"85vh",overflowY:"auto"},
-    editHint:{fontSize:11,color:"rgba(234,179,8,0.6)",background:"rgba(234,179,8,0.06)",border:"1px solid rgba(234,179,8,0.15)",borderRadius:6,padding:"6px 12px",marginBottom:16,display:"block"},
-    banner:{fontSize:12,color:"#eab308",background:"rgba(234,179,8,0.1)",border:"1px solid rgba(234,179,8,0.3)",borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8},
-    table:{width:"100%",borderCollapse:"collapse",fontSize:12},
-    th:{textAlign:"left",padding:"8px 10px",fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",color:"rgba(232,220,200,0.35)",borderBottom:"1px solid rgba(255,255,255,0.06)"},
-    td:{padding:"10px 10px",borderBottom:"1px solid rgba(255,255,255,0.04)",color:"#e8dcc8"},
-    badge:(up)=>({fontSize:10,padding:"2px 8px",borderRadius:10,background:up?"rgba(34,197,94,0.12)":"rgba(239,68,68,0.12)",color:up?"#22c55e":"#ef4444",fontWeight:700}),
-  };
+  if (loading) return <div className="main"><p>Loading HVC dashboard…</p></div>;
+  if (!data) return <div className="main"><p>Could not reach the backend. Check GAS_URL at the top of the script.</p></div>;
 
-  const MonthBanner = () => (
-    !hasSnapshotThisMonth && isChairman && (
-      <div style={S.banner}>
-        <span>📅 {monthLabel(thisMonthKey)} hasn't been recorded yet. Lock in this month's numbers for the record.</span>
-        <button style={S.btnGreen} onClick={()=>setShowRecordMonth(true)}>Record This Month</button>
-      </div>
-    )
-  );
+  const members = data.members || [];
+  const activeMembers = members.filter(m => m.status === "Active");
 
-  // ════════════════════════════════════════════════════════════
-  // TABS
-  // ════════════════════════════════════════════════════════════
+  const nav = [
+    ["overview", "Overview"],
+    ["members", "Members & Equity"],
+    ["ledger", "Financial Ledger"],
+    ["batches", "Poultry Batches"],
+    ["reports", "Reports"],
+    ["ideas", "Ideas"],
+    ["settings", "Settings"]
+  ];
 
-  const Overview = () => {
-    const prevSnapshot = sortedSnapshots.length>0 ? sortedSnapshots[sortedSnapshots.length-1] : null;
-    const assetChange = prevSnapshot ? totalAssets - prevSnapshot.totalAssets : null;
-    const assetChangePct = prevSnapshot && prevSnapshot.totalAssets ? ((assetChange/prevSnapshot.totalAssets)*100).toFixed(1) : null;
-
-    return (
-    <div>
-      {isChairman && <span style={S.editHint}>✏️ Chairman Mode — tap any text or number to edit</span>}
-      <MonthBanner/>
-      <div style={S.goldCard}>
-        <div style={{fontSize:"clamp(14px,4vw,22px)",fontWeight:700,color:"#eab308",marginBottom:6,textAlign:"center"}}>
-          <EditableField value={data.org.name} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,name:v}}))}/>
+  return (
+    <div className="app-shell">
+      <div className="sidebar">
+        <div className="brand">
+          <div className="brand-title">HVC</div>
+          <div className="brand-sub">Harembe Viewer's Corp.</div>
         </div>
-        <div style={{textAlign:"center",fontSize:12,color:"rgba(232,220,200,0.5)",marginBottom:4}}>
-          (<EditableField value={data.org.abbreviation} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,abbreviation:v}}))}/>)
-          &nbsp;·&nbsp;"<EditableField value={data.org.motto} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,motto:v}}))}/>
-          "
-        </div>
-        <div style={{textAlign:"center",fontSize:11,color:"rgba(232,220,200,0.35)",marginTop:6,display:"flex",justifyContent:"center",gap:12,flexWrap:"wrap"}}>
-          <span>📍<EditableField value={data.org.location} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,location:v}}))}/></span>
-          <span>· Est. <EditableField value={data.org.founded} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,founded:v}}))}/></span>
-          <span>· 👑<EditableField value={data.org.chairmanName} isChairman={isChairman} onChange={v=>update(d=>({...d,org:{...d.org,chairmanName:v}}))}/></span>
-        </div>
-      </div>
-
-      {prevSnapshot && (
-        <div style={S.card}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div>
-              <div style={S.label}>This Month vs. Last Recorded ({monthLabel(prevSnapshot.month)})</div>
-              <div style={{fontSize:20,fontWeight:700,color:assetChange>=0?"#22c55e":"#ef4444"}}>
-                {assetChange>=0?"+":""}{fmt(assetChange)}
-              </div>
-            </div>
-            <span style={S.badge(assetChange>=0)}>{assetChange>=0?"▲":"▼"} {Math.abs(assetChangePct)}%</span>
-          </div>
-        </div>
-      )}
-
-      <div style={S.grid}>
-        {[
-          {label:"Total Assets",val:fmt(totalAssets)},
-          {label:"Cash at Hand",val:fmt(data.cash)},
-          {label:"Birds Value",val:fmt(birdsValue)},
-          {label:"Unrealised Gain",val:(unrealisedGain>=0?"+":"")+fmt(unrealisedGain),color:unrealisedGain>=0?"#22c55e":"#ef4444"},
-          {label:"Total Invested",val:fmt(invested)},
-          {label:"Members",val:data.members.length},
-        ].map((k,i)=>(
-          <div key={i} style={S.card}>
-            <div style={S.label}>{k.label}</div>
-            <div style={{...S.bigVal,fontSize:18,color:k.color||"#eab308"}}>{k.val}</div>
-          </div>
+        {nav.map(([key, label]) => (
+          <div key={key} className={"nav-item" + (view === key ? " active" : "")} onClick={() => setView(key)}>{label}</div>
         ))}
       </div>
-      <div style={S.card}>
-        <div style={S.sectionTitle}>Member Shares</div>
-        {data.members.map(m=>{
-          const share = parseFloat(shareOf(m,data.members));
-          return(
-            <div key={m.id} style={{marginBottom:14}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4,fontSize:13}}>
-                <span style={{fontWeight:600}}>{m.name}</span>
-                <span style={{color:"#eab308",fontSize:12}}>{share}% · {fmt((share/100)*totalAssets)}</span>
-              </div>
-              <div style={{height:5,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
-                <div style={{height:"100%",width:`${share}%`,background:"linear-gradient(90deg,#eab308,#f59e0b)",borderRadius:3,transition:"width 0.5s"}}/>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );};
-
-  const Financials = () => (
-    <div>
-      {isChairman && <span style={S.editHint}>✏️ Tap cash value or transaction details to edit</span>}
-      <MonthBanner/>
-      <div style={S.grid}>
-        <div style={S.goldCard}>
-          <div style={S.label}>Total Assets</div>
-          <div style={{...S.bigVal,fontSize:18}}>{fmt(totalAssets)}</div>
+      <div className="main">
+        <div className="topbar">
+          <h1 className="page-title">{nav.find(n => n[0] === view)[1]}</h1>
+          <div className="who">
+            Recording as{" "}
+            <select value={me} onChange={e => setMe(e.target.value)}>
+              <option value="">— select your name —</option>
+              {activeMembers.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </div>
         </div>
-        <div style={S.card}>
-          <div style={S.label}>Cash at Hand</div>
-          <div style={{fontSize:18,fontWeight:700,color:"#22c55e"}}>
-            {isChairman
-              ? <EditableField value={data.cash} type="number" prefix="UGX " isChairman={isChairman} onChange={v=>update(d=>({...d,cash:v}))}/>
-              : fmt(data.cash)}
-          </div>
-   sChairman && <span style={S.editHint}>✏️ Tap names, contributions, roles to edit</span>}
-      <MonthBanner/>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <div style={S.sectionTitle}>{data.members.length} Members · {fmt(totalContrib)} Total</div>
-        {isChairman && <button style={S.btnGold} onClick={()=>setShowAddMember(true)}>+ Add</button>}
+
+        {view === "overview" && <Overview data={data} />}
+        {view === "members" && <Members data={data} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
+        {view === "ledger" && <Ledger data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
+        {view === "batches" && <Batches data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
+        {view === "reports" && <Reports data={data} />}
+        {view === "ideas" && <Ideas data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
+        {view === "settings" && <Settings data={data} isOwner={isOwner} ownerPassword={ownerPassword} setOwnerPassword={setOwnerPassword} doAction={doAction} />}
+
+        {toast && <div className={"toast" + (toast.isError ? " error" : "")}>{toast.message}</div>}
       </div>
-      {data.members.map(m=>{
-        const share = parseFloat(shareOf(m,data.members));
-        return(
-          <div key={m.id} style={S.card}>
-            <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-              <div style={{width:40,height:40,borderRadius:"50%",background:"rgba(234,179,8,0.12)",border:"1px solid rgba(234,179,8,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"#eab308",flexShrink:0}}>
-                {m.name.charAt(0)}
-              </div>
-              <div style={{flex:1,minWidth:120}}>
-                <div style={{fontSize:15,fontWeight:700,marginBottom:2}}>
-                  <EditableField value={m.name} isChairman={isChairman} onChange={v=>update(d=>({...d,members:d.members.map(mem=>mem.id===m.id?{...mem,name:v}:mem)}))}/>
-                </div>
-                <div style={{fontSize:10,color:"rgba(234,179,8,0.6)"}}>
-                  <EditableField value={m.role} isChairman={isChairman} onChange={v=>update(d=>({...d,members:d.members.map(mem=>mem.id===m.id?{...mem,role:v}:mem)}))}/>
-                </div>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:14,fontWeight:700,color:"#eab308"}}>{share}%</div>
-                <div style={{fontSize:11,color:"rgba(232,220,200,0.5)"}}>
-                  {isChairman
-                    ? <EditableField value={m.contribution} type="number" prefix="UGX " isChairman={isChairman} onChange={v=>update(d=>({...d,members:d.members.map(mem=>mem.id===m.id?{...mem,contribution:v}:mem)}))}/>
-                    : fmt(m.contribution)}
-                </div>
-              </div>
-              {isChairman && <button style={S.btnRed} onClick={()=>update(d=>({...d,members:d.members.filter(mem=>mem.id!==m.id)}))}>✕</button>}
-            </div>
-            <div style={{marginTop:10,height:5,background:"rgba(255,255,255,0.06)",borderRadius:3}}>
-              <div style={{height:"100%",width:`${share}%`,background:"linear-gradient(90deg,#eab308,#f59e0b)",borderRadius:3}}/>
-            </div>
-            <div style={{marginTop:6,fontSize:11,color:"#22c55e",textAlign:"right"}}>
-              Asset value: {fmt((share/100)*totalAssets)}
-            </div>
-            {/* Per-member contribution growth across recorded months */}
-            {sortedSnapshots.length>0 && (
-              <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.05)"}}>
-                <div style={{fontSize:9,letterSpacing:"0.1em",textTransform:"uppercase",color:"rgba(232,220,200,0.35)",marginBottom:6}}>Contribution Growth</div>
-                <MiniBarChart
-                  data={[...sortedSnapshots.map(s=>{
-                    const mc = s.memberContributions.find(x=>x.id===m.id);
-                    return {label:monthLabel(s.month).split(" ")[0].slice(0,3), contribution: mc?mc.contribution:0};
-                  }), {label:"Now", contribution:m.contribution}]}
-                  labelKey="label" valueKey="contribution" height={100}
-                />
-              </div>
-            )}
-          </div>
-        );
-      })}
     </div>
   );
+}
 
-  const Assets = () => (
+function Overview({ data }) {
+  const totalCapital = (data.members || []).filter(m => m.status === "Active").reduce((s, m) => s + Number(m.share_capital_ugx || 0), 0);
+  const ledger = data.ledger || [];
+  const sumBy = (cat) => ledger.filter(l => l.category === cat).reduce((s, l) => s + Number(l.amount_ugx || 0), 0);
+  const revenue = sumBy("Revenue");
+  const expenditure = sumBy("Expenditure") + sumBy("AssetLoss");
+  const activeBirds = (data.batches || []).filter(b => b.status === "Active").reduce((s, b) => s + Number(b.current_active_quantity || 0), 0);
+  const pendingCount = ledger.filter(l => l.verification_state === "Pending").length;
+
+  return (
     <div>
-      {isChairman && <span style={S.editHint}>✏️ Update cash and asset values directly</span>}
-      <MonthBanner/>
-      <div style={S.grid}>
-        <div style={S.goldCard}>
-          <div style={S.label}>Total Assets</div>
-          <div style={{...S.bigVal,fontSize:20}}>{fmt(totalAssets)}</div>
-        </div>
-        <div style={S.card}>
-          <div style={S.label}>Cash at Hand</div>
-          <div style={{fontSize:20,fontWeight:700,color:"#22c55e"}}>
-            {isChairman
-              ? <EditableField value={data.cash} type="number" prefix="UGX " isChairman={isChairman} onChange={v=>update(d=>({...d,cash:v}))}/>
-              : fmt(data.cash)}
-          </div>
-        </div>
+      <div className="grid">
+        <div className="card"><div className="stat-label">Total Share Capital</div><div className="stat-value mono">{fmtUgx(totalCapital)}</div></div>
+        <div className="card"><div className="stat-label">Revenue Recorded</div><div className="stat-value mono">{fmtUgx(revenue)}</div></div>
+        <div className="card"><div className="stat-label">Expenditure &amp; Losses</div><div className="stat-value mono">{fmtUgx(expenditure)}</div></div>
+        <div className="card"><div className="stat-label">Active Birds</div><div className="stat-value mono">{activeBirds}</div></div>
       </div>
-      <div style={S.card}>
-        <div style={S.sectionTitle}>Asset Breakdown</div>
-        <table style={S.table}>
-          <thead><tr>
-            <th style={S.th}>Asset</th>
-            <th style={S.th}>Invested</th>
-            <th style={S.th}>Value</th>
-            <th style={S.th}>Gain</th>
-          </tr></thead>
+      <div className="card">
+        <div className="section-title">Recent Ledger Activity</div>
+        <table>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
           <tbody>
-            {data.investments.map(inv=>(
-              <tr key={inv.id}>
-                <td style={S.td}>{inv.batch}</td>
-                <td style={S.td}>{fmt(inv.invested)}</td>
-                <td style={{...S.td,color:"#22c55e"}}>{fmt(inv.currentValue)}</td>
-                <td style={{...S.td,color:inv.currentValue>=inv.invested?"#22c55e":"#ef4444",fontWeight:600}}>
-                  {inv.currentValue>=inv.invested?"+":""}{fmt(inv.currentValue-inv.invested)}
-                </td>
+            {ledger.slice(-8).reverse().map(l => (
+              <tr key={l.transaction_id}>
+                <td>{new Date(l.timestamp).toLocaleDateString()}</td>
+                <td>{l.category}</td>
+                <td>{l.description}</td>
+                <td className={"amount " + (["Revenue"].includes(l.category) ? "pos" : "neg")}>{fmtUgx(l.amount_ugx)}</td>
+                <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
               </tr>
             ))}
-            <tr style={{background:"rgba(234,179,8,0.05)"}}>
-              <td style={{...S.td,fontWeight:700,color:"#eab308"}}>Cash</td>
-              <td style={S.td}>—</td>
-              <td style={{...S.td,color:"#22c55e",fontWeight:700}}>{fmt(data.cash)}</td>
-              <td style={S.td}>—</td>
-            </tr>
-            <tr style={{background:"rgba(234,179,8,0.08)"}}>
-              <td style={{...S.td,fontWeight:700,color:"#eab308",borderTop:"1px solid rgba(234,179,8,0.2)"}}>TOTAL</td>
-              <td style={{...S.td,fontWeight:700,borderTop:"1px solid rgba(234,179,8,0.2)"}}>{fmt(invested)}</td>
-              <td style={{...S.td,color:"#22c55e",fontWeight:700,borderTop:"1px solid rgba(234,179,8,0.2)"}}>{fmt(totalAssets)}</td>
-              <td style={{...S.td,color:unrealisedGain>=0?"#22c55e":"#ef4444",fontWeight:700,borderTop:"1px solid rgba(234,179,8,0.2)"}}>
-                {unrealisedGain>=0?"+":""}{fmt(unrealisedGain)}
-              </td>
-            </tr>
+            {ledger.length === 0 && <tr><td colSpan="5" className="empty">No transactions yet.</td></tr>}
+          </tbody>
+        </table>
+        {pendingCount > 0 && <p style={{fontSize:12,color:"var(--text-muted)",marginTop:10}}>{pendingCount} transaction(s) awaiting owner verification.</p>}
+      </div>
+    </div>
+  );
+}
+
+function OwnerGate({ ownerPassword, isOwner, children }) {
+  if (isOwner) return children;
+  return <div className="owner-lock">Owner password required to view/edit this section. Enter it in <b>Settings</b>.</div>;
+}
+
+function Members({ data, isOwner, ownerPassword, doAction }) {
+  const [form, setForm] = useState({ fullName: "", role: "Member", shareCapitalUgx: "" });
+  const roles = (data.config.Roles || "").split(",");
+
+  const submit = async () => {
+    await doAction({ action: "addMember", ownerPassword, ownerName: "Owner", fullName: form.fullName, role: form.role, shareCapitalUgx: Number(form.shareCapitalUgx) });
+    setForm({ fullName: "", role: "Member", shareCapitalUgx: "" });
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Members</div>
+        <table>
+          <thead><tr><th>Name</th><th>Role</th><th>Capital</th><th>Equity</th><th>Status</th></tr></thead>
+          <tbody>
+            {(data.members || []).map(m => (
+              <tr key={m.member_id}>
+                <td>{m.full_name}</td>
+                <td><span className="badge-role">{m.role}</span></td>
+                <td className="amount">{fmtUgx(m.share_capital_ugx)}</td>
+                <td className="mono">{(Number(m.equity_bps) / 100).toFixed(2)}%</td>
+                <td>{m.status}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
-      <div style={S.card}>
-        <div style={S.sectionTitle}>Member Allocations</div>
-        <table style={S.table}>
-          <thead><tr>
-            <th style={S.th}>Member</th>
-            <th style={S.th}>Share</th>
-            <th style={S.th}>Cash Portion</th>
-            <th style={S.th}>Total Value</th>
-          </tr></thead>
+      <div className="card">
+        <div className="section-title">Add Member</div>
+        <OwnerGate ownerPassword={ownerPassword} isOwner={isOwner}>
+          <div className="form-grid">
+            <div className="field"><label>Full name</label><input value={form.fullName} onChange={e => setForm({...form, fullName: e.target.value})} /></div>
+            <div className="field"><label>Role</label>
+              <select value={form.role} onChange={e => setForm({...form, role: e.target.value})}>
+                {roles.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div className="field"><label>Initial share capital (UGX)</label><input type="number" value={form.shareCapitalUgx} onChange={e => setForm({...form, shareCapitalUgx: e.target.value})} /></div>
+          </div>
+          <button className="btn gold" disabled={!form.fullName} onClick={submit}>Add member</button>
+        </OwnerGate>
+      </div>
+    </div>
+  );
+}
+
+function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
+  const categories = (data.config.LedgerCategories || "").split(",");
+  const [form, setForm] = useState({ category: categories[0] || "", amountUgx: "", description: "" });
+
+  const submit = async () => {
+    if (!me) return;
+    await doAction({ action: "addLedgerEntry", recordedBy: me, category: form.category, amountUgx: Number(form.amountUgx), description: form.description });
+    setForm({ category: categories[0] || "", amountUgx: "", description: "" });
+  };
+
+  const verify = (id) => doAction({ action: "verifyTransaction", ownerPassword, ownerName: "Owner", transactionId: id });
+
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Add Transaction</div>
+        {!me && <p style={{fontSize:12,color:"var(--text-muted)"}}>Select your name at the top right first.</p>}
+        <div className="form-grid">
+          <div className="field"><label>Category</label>
+            <select value={form.category} onChange={e => setForm({...form, category: e.target.value})}>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>Amount (UGX)</label><input type="number" value={form.amountUgx} onChange={e => setForm({...form, amountUgx: e.target.value})} /></div>
+        </div>
+        <div className="field"><label>Description</label><input value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
+        <button className="btn gold" disabled={!me || !form.amountUgx} onClick={submit}>Record transaction</button>
+      </div>
+      <div className="card">
+        <div className="section-title">All Transactions</div>
+        <table>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>By</th><th>Amount</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
           <tbody>
-            {data.members.map(m=>{
-              const share = parseFloat(shareOf(m,data.members))/100;
-              return(
-                <tr key={m.id}>
-                  <td style={S.td}>{m.name}</td>
-                  <td style={{...S.td,color:"#eab308"}}>{(share*100).toFixed(1)}%</td>
-                  <td style={S.td}>{fmt(data.cash*share)}</td>
-                  <td style={{...S.td,color:"#22c55e",fontWeight:600}}>{fmt(totalAssets*share)}</td>
+            {(data.ledger || []).slice().reverse().map(l => {
+              const member = (data.members || []).find(m => m.member_id === l.recorded_by);
+              return (
+                <tr key={l.transaction_id}>
+                  <td>{new Date(l.timestamp).toLocaleDateString()}</td>
+                  <td>{l.category}</td>
+                  <td>{l.description}</td>
+                  <td>{member ? member.full_name : l.recorded_by}</td>
+                  <td className="amount">{fmtUgx(l.amount_ugx)}</td>
+                  <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
+                  {isOwner && <td>{l.verification_state === "Pending" && <button className="btn ghost" onClick={() => verify(l.transaction_id)}>Verify</button>}</td>}
                 </tr>
               );
             })}
+            {(data.ledger || []).length === 0 && <tr><td colSpan="7" className="empty">No transactions yet.</td></tr>}
           </tbody>
         </table>
       </div>
     </div>
   );
+}
 
-  // ── NEW: PERFORMANCE TAB (monthly totals + contributions) ──
-  const Performance = () => {
-    const chartData = [...sortedSnapshots.map(s=>({label:monthLabel(s.month).split(" ")[0].slice(0,3)+" "+s.month.slice(2,4), totalAssets:s.totalAssets})), {label:"Now", totalAssets}];
-    const contribChartData = [...sortedSnapshots.map(s=>({label:monthLabel(s.month).split(" ")[0].slice(0,3)+" "+s.month.slice(2,4), total:totalContributions(s.memberContributions)})), {label:"Now", total:totalContrib}];
+function Batches({ data, me, isOwner, ownerPassword, doAction }) {
+  const [form, setForm] = useState({ label: "", initialQuantity: "", purchaseCostUgx: "" });
+  const [logForm, setLogForm] = useState({ batchId: "", eventType: "", quantityAffected: "", notes: "" });
+  const eventTypes = (data.config.HealthEventTypes || "").split(",");
 
-    return (
-      <div>
-        <MonthBanner/>
-        <div style={S.card}>
-          <div style={S.sectionTitle}>Total Assets — Month by Month</div>
-          <MiniBarChart data={chartData} labelKey="label" valueKey="totalAssets"/>
-          {sortedSnapshots.length===0 && <div style={{fontSize:11,color:"rgba(232,220,200,0.4)",marginTop:8}}>Once you record a month, comparisons will appear here.</div>}
-        </div>
-
-        <div style={S.card}>
-          <div style={S.sectionTitle}>Total Contributions — Month by Month</div>
-          <MiniBarChart data={contribChartData} labelKey="label" valueKey="total" color="#22c55e"/>
-        </div>
-
-        <div style={S.card}>
-          <div style={S.sectionTitle}>Recorded Months</div>
-          {sortedSnapshots.length===0
-            ? <div style={{fontSize:12,color:"rgba(232,220,200,0.4)"}}>No months recorded yet.</div>
-            : <table style={S.table}>
-                <thead><tr>
-                  <th style={S.th}>Month</th>
-                  <th style={S.th}>Total Assets</th>
-                  <th style={S.th}>Cash</th>
-                  <th style={S.th}>Birds Value</th>
-                </tr></thead>
-                <tbody>
-                  {[...sortedSnapshots].reverse().map(s=>(
-                    <tr key={s.month}>
-                      <td style={S.td}>{monthLabel(s.month)}</td>
-                      <td style={{...S.td,color:"#eab308",fontWeight:600}}>{fmt(s.totalAssets)}</td>
-                      <td style={S.td}>{fmt(s.cash)}</td>
-                      <td style={S.td}>{fmt(s.birdsValue)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-          }
-        </div>
-      </div>
-    );
+  const addBatch = async () => {
+    await doAction({ action: "addBatch", ownerPassword, ownerName: "Owner", label: form.label, initialQuantity: Number(form.initialQuantity), purchaseCostUgx: Number(form.purchaseCostUgx) });
+    setForm({ label: "", initialQuantity: "", purchaseCostUgx: "" });
   };
 
-  const tabs = [
-    {id:"overview",label:"Overview",icon:"◈"},
-    {id:"performance",label:"Performance",icon:"📈"},
-    {id:"financials",label:"Financials",icon:"₿"},
-    {id:"investments",label:"Birds",icon:"🐓"},
-    {id:"members",label:"Members",icon:"👥"},
-    {id:"assets",label:"Assets",icon:"🏦"},
-  ];
-
-  const renderTab = () => {
-    switch(tab){
-      case "overview": return <Overview/>;
-      case "performance": return <Performance/>;
-      case "financials": return <Financials/>;
-      case "investments": return <Investments/>;
-      case "members": return <Members/>;
-      case "assets": return <Assets/>;
-      default: return <Overview/>;
-    }
+  const addLog = async () => {
+    if (!me || !logForm.batchId) return;
+    await doAction({ action: "addHealthLog", recordedBy: me, batchId: logForm.batchId, eventType: logForm.eventType, quantityAffected: Number(logForm.quantityAffected || 0), notes: logForm.notes });
+    setLogForm({ batchId: "", eventType: "", quantityAffected: "", notes: "" });
   };
 
-  const selectedBatch = selectedBatchId ? data.investments.find(i=>i.id===selectedBatchId) : null;
-
-  // ════════════════════════════════════════════════════════════
-  // RENDER
-  // ════════════════════════════════════════════════════════════
-  return(
-    <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#0a0f1e 0%,#0d1a2e 50%,#0a1628 100%)"}}>
-      {/* HEADER */}
-      <div style={{borderBottom:"1px solid rgba(234,179,8,0.2)",background:"rgba(10,15,30,0.95)",backdropFilter:"blur(20px)",position:"sticky",top:0,zIndex:50}}>
-        <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
-          <div>
-            <div style={{fontSize:"clamp(13px,3.5vw,18px)",fontWeight:700,color:"#eab308",letterSpacing:"0.06em"}}>{data.org.abbreviation} Dashboard</div>
-            <div style={{fontSize:10,color:"rgba(232,220,200,0.35)",letterSpacing:"0.1em"}}>{data.org.motto}</div>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-            <span style={{fontSize:10,color:syncStatus.startsWith("✓")?"#22c55e":syncStatus.startsWith("⚠️")?"#ef4444":"rgba(232,220,200,0.4)"}}>
-              {syncStatus}
-            </span>
-            {isChairman
-              ? <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                  <span style={{fontSize:10,padding:"4px 10px",borderRadius:12,background:"rgba(234,179,8,0.1)",color:"#eab308",border:"1px solid rgba(234,179,8,0.3)"}}>👑 Chairman</span>
-                  <button style={S.btnRed} onClick={()=>setIsChairman(false)}>Lock</button>
-                </div>
-              : <button style={S.btnGold} onClick={()=>setShowLogin(true)}>🔐 Login</button>
-            }
-          </div>
-        </div>
-        {/* NAV TABS */}
-        <div style={{display:"flex",overflowX:"auto",borderTop:"1px solid rgba(255,255,255,0.05)",padding:"0 8px"}}>
-          {tabs.map(t=>(
-            <button key={t.id} onClick={()=>setTab(t.id)}
-              style={{padding:"10px 14px",border:"none",background:"transparent",color:tab===t.id?"#eab308":"rgba(232,220,200,0.4)",fontSize:11,letterSpacing:"0.05em",cursor:"pointer",borderBottom:tab===t.id?"2px solid #eab308":"2px solid transparent",whiteSpace:"nowrap",fontFamily:"Georgia,serif",transition:"all 0.2s"}}>
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* PAGE CONTENT */}
-      <div style={{padding:"16px",maxWidth:800,margin:"0 auto"}}>
-        {renderTab()}
-      </div>
-
-      {/* FOOTER */}
-      <div style={{textAlign:"center",padding:"16px",fontSize:10,color:"rgba(232,220,200,0.2)",letterSpacing:"0.08em"}}>
-        {data.org.name} · Updated {new Date(data.lastUpdated).toLocaleString()}
-      </div>
-
-      {/* ── LOGIN MODAL ── */}
-      {showLogin && (
-        <div style={S.overlay} onClick={()=>setShowLogin(false)}>
-          <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:18,fontWeight:700,color:"#eab308",marginBottom:6}}>👑 Chairman Login</div>
-            <div style={{fontSize:12,color:"rgba(232,220,200,0.4)",marginBottom:16}}>Enter password to unlock edit mode</div>
-            <input type="password" placeholder="Password" value={pw}
-              onChange={e=>{setPw(e.target.value);setPwErr(false);}}
-              onKeyDown={e=>{if(e.key==="Enter"){if(pw===CHAIRMAN_PASSWORD){setIsChairman(true);setShowLogin(false);setPw("");}else setPwErr(true);}}}
-              style={{...S.input,border:pwErr?"1px solid #ef4444":"1px solid rgba(255,255,255,0.1)"}}/>
-            {pwErr && <div style={{color:"#ef4444",fontSize:12,marginBottom:8}}>Wrong password</div>}
-            <div style={{display:"flex",gap:8}}>
-              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{if(pw===CHAIRMAN_PASSWORD){setIsChairman(true);setShowLogin(false);setPw("");}else setPwErr(true);}}>Unlock</button>
-              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowLogin(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── ADD MEMBER MODAL ── */}
-      {showAddMember && (
-        <div style={S.overlay} onClick={()=>setShowAddMember(false)}>
-          <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:16}}>+ Add Member</div>
-            <input placeholder="Full Name" value={newMember.name} onChange={e=>setNewMember(p=>({...p,name:e.target.value}))} style={S.input}/>
-            <input type="number" placeholder="Contribution (UGX)" value={newMember.contribution} onChange={e=>setNewMember(p=>({...p,contribution:parseFloat(e.target.value)||0}))} style={S.input}/>
-            <input placeholder="Role" value={newMember.role} onChange={e=>setNewMember(p=>({...p,role:e.target.value}))} style={S.input}/>
-            <div style={{display:"flex",gap:8,marginTop:8}}>
-              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{update(d=>({...d,members:[...d.members,{...newMember,id:Date.now()}]}));setNewMember({name:"",contribution:0,role:"Member"});setShowAddMember(false);}}>Add</button>
-              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowAddMember(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── ADD INVESTMENT MODAL ── */}
-      {showAddInv && (
-        <div style={S.overlay} onClick={()=>setShowAddInv(false)}>
-          <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:16}}>+ Add Investment Batch</div>
-            {[["Batch Name","batch","text"],["Type","type","text"],["Description","description","text"],["Invested (UGX)","invested","number"],["Current Value (UGX)","currentValue","number"],["Notes","notes","text"],["Date","date","date"]].map(([label,key,type])=>(
-              <input key={key} type={type} placeholder={label} value={newInv[key]}
-                onChange={e=>setNewInv(p=>({...p,[key]:type==="number"?parseFloat(e.target.value)||0:e.target.value}))}
-                style={S.input}/>
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Batches</div>
+        <table>
+          <thead><tr><th>Batch</th><th>Started</th><th>Initial</th><th>Active now</th><th>Cost</th><th>Est. value</th><th>Status</th></tr></thead>
+          <tbody>
+            {(data.batches || []).map(b => (
+              <tr key={b.batch_id}>
+                <td>{b.label}</td>
+                <td>{b.start_date}</td>
+                <td>{b.initial_quantity}</td>
+                <td>{b.current_active_quantity}</td>
+                <td className="amount">{fmtUgx(b.purchase_cost_ugx)}</td>
+                <td className="amount">{fmtUgx(b.estimated_asset_value_ugx)}</td>
+                <td>{b.status}</td>
+              </tr>
             ))}
-            <div style={{display:"flex",gap:8}}>
-              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{update(d=>({...d,investments:[...d.investments,{...newInv,id:Date.now(),birds:[]}]}));setShowAddInv(false);}}>Add</button>
-              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowAddInv(false)}>Cancel</button>
-            </div>
-          </div>
-        </div>
-      )}
+            {(data.batches || []).length === 0 && <tr><td colSpan="7" className="empty">No batches yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
 
-      {/* ── ADD TRANSACTION MODAL ── */}
-      {showAddTx && (
-        <div style={S.overlay} onClick={()=>setShowAddTx(false)}>
-          <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:16}}>+ Add Transaction</div>
-            <input type="date" value={newTx.date} onChange={e=>setNewTx(p=>({...p,date:e.target.value}))} style={S.input}/>
-            <input placeholder="Description" value={newTx.description} onChange={e=>setNewTx(p=>({...p,description:e.target.value}))} style={S.input}/>
-            <input type="number" placeholder="Amount (negative = expense)" value={newTx.amount} onChange={e=>setNewTx(p=>({...p,amount:parseFloat(e.target.value)||0}))} style={S.input}/>
-            <select value={newTx.type} onChange={e=>setNewTx(p=>({...p,type:e.target.value}))} style={S.select}>
-              {["Income","Investment","Loss","Expense","Withdrawal"].map(t=><option key={t}>{t}</option>)}
+      <div className="card">
+        <div className="section-title">New Batch</div>
+        <OwnerGate ownerPassword={ownerPassword} isOwner={isOwner}>
+          <div className="form-grid">
+            <div className="field"><label>Label (e.g. "June Birds")</label><input value={form.label} onChange={e => setForm({...form, label: e.target.value})} /></div>
+            <div className="field"><label>Initial quantity</label><input type="number" value={form.initialQuantity} onChange={e => setForm({...form, initialQuantity: e.target.value})} /></div>
+            <div className="field"><label>Purchase cost (UGX)</label><input type="number" value={form.purchaseCostUgx} onChange={e => setForm({...form, purchaseCostUgx: e.target.value})} /></div>
+          </div>
+          <button className="btn gold" disabled={!form.label} onClick={addBatch}>Create batch</button>
+        </OwnerGate>
+      </div>
+
+      <div className="card">
+        <div className="section-title">Log Health Event</div>
+        {!me && <p style={{fontSize:12,color:"var(--text-muted)"}}>Select your name at the top right first.</p>}
+        <div className="form-grid">
+          <div className="field"><label>Batch</label>
+            <select value={logForm.batchId} onChange={e => setLogForm({...logForm, batchId: e.target.value})}>
+              <option value="">— choose —</option>
+              {(data.batches || []).map(b => <option key={b.batch_id} value={b.batch_id}>{b.label}</option>)}
             </select>
-            <div style={{display:"flex",gap:8}}>
-              <button style={{...S.btnGold,flex:1,padding:12}} onClick={()=>{update(d=>({...d,transactions:[...d.transactions,{...newTx,id:Date.now()}]}));setShowAddTx(false);}}>Add</button>
-              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowAddTx(false)}>Cancel</button>
-            </div>
           </div>
-        </div>
-      )}
-
-      {/* ── RECORD MONTH MODAL ── */}
-      {showRecordMonth && (
-        <div style={S.overlay} onClick={()=>setShowRecordMonth(false)}>
-          <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:6}}>📅 Record {monthLabel(thisMonthKey)}</div>
-            <div style={{fontSize:12,color:"rgba(232,220,200,0.5)",marginBottom:16}}>This locks in the current numbers as this month's official record. Review before confirming:</div>
-            <div style={{...S.card,margin:"0 0 16px 0"}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,fontSize:13}}><span>Total Assets</span><b style={{color:"#eab308"}}>{fmt(totalAssets)}</b></div>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,fontSize:13}}><span>Cash</span><b>{fmt(data.cash)}</b></div>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,fontSize:13}}><span>Birds Value</span><b>{fmt(birdsValue)}</b></div>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span>Total Contributions</span><b>{fmt(totalContrib)}</b></div>
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              <button style={{...S.btnGreen,flex:1,padding:12}} onClick={recordMonth}>Confirm & Lock In</button>
-              <button style={{...S.btnRed,flex:1,padding:12}} onClick={()=>setShowRecordMonth(false)}>Cancel</button>
-            </div>
+          <div className="field"><label>Event type</label>
+            <select value={logForm.eventType} onChange={e => setLogForm({...logForm, eventType: e.target.value})}>
+              <option value="">— choose —</option>
+              {eventTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
+          <div className="field"><label>Quantity affected</label><input type="number" value={logForm.quantityAffected} onChange={e => setLogForm({...logForm, quantityAffected: e.target.value})} /></div>
+          <div className="field"><label>Notes</label><input value={logForm.notes} onChange={e => setLogForm({...logForm, notes: e.target.value})} /></div>
         </div>
-      )}
-
-      {/* ── BATCH HISTORY MODAL ── */}
-      {selectedBatch && (
-        <div style={S.overlay} onClick={()=>setSelectedBatchId(null)}>
-          <div style={S.modal} onClick={e=>e.stopPropagation()}>
-            <div style={{fontSize:16,fontWeight:700,color:"#eab308",marginBottom:6}}>📊 {selectedBatch.batch} — History</div>
-            <div style={{fontSize:12,color:"rgba(232,220,200,0.5)",marginBottom:16}}>Value recorded each month</div>
-            {(() => {
-              const history = sortedSnapshots
-                .map(s=>({month:s.month, entry:s.batchValues.find(b=>b.batchId===selectedBatch.id)}))
-                .filter(h=>h.entry);
-              const chartData = [...history.map(h=>({label:monthLabel(h.month).split(" ")[0].slice(0,3), currentValue:h.entry.currentValue})), {label:"Now", currentValue:selectedBatch.currentValue}];
-              return (
-                <>
-                  <MiniBarChart data={chartData} labelKey="label" valueKey="currentValue" color="#22c55e"/>
-                  {history.length===0 && <div style={{fontSize:11,color:"rgba(232,220,200,0.4)",marginTop:8}}>No monthly records yet for this batch — record a month to start tracking.</div>}
-                </>
-              );
-            })()}
-            <button style={{...S.btnGold,width:"100%",padding:12,marginTop:16}} onClick={()=>setSelectedBatchId(null)}>Close</button>
-          </div>
-        </div>
-      )}
+        <button className="btn gold" disabled={!me || !logForm.batchId || !logForm.eventType} onClick={addLog}>Log event</button>
+      </div>
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+function Reports({ data }) {
+  const ledger = data.ledger || [];
+  const batches = data.batches || [];
+  const healthLog = data.healthLog || [];
+  const dailyNotes = data.dailyNotes || [];
+
+  // --- Per-batch ROI ---
+  const batchReports = batches.map(b => {
+    const batchLedger = ledger.filter(l => l.related_batch_id === b.batch_id);
+    const revenue = batchLedger.filter(l => l.category === "Revenue").reduce((s, l) => s + Number(l.amount_ugx || 0), 0);
+    const expenditure = batchLedger.filter(l => l.category === "Expenditure" || l.category === "AssetLoss").reduce((s, l) => s + Number(l.amount_ugx || 0), 0);
+    const totalCost = Number(b.purchase_cost_ugx || 0) + expenditure;
+    const netPosition = revenue + Number(b.estimated_asset_value_ugx || 0) - totalCost;
+    const roiPct = totalCost > 0 ? (netPosition / totalCost) * 100 : 0;
+
+    const logs = healthLog.filter(l => l.batch_id === b.batch_id);
+    const mortality = logs.filter(l => l.event_type === "Mortality").reduce((s, l) => s + Number(l.quantity_affected || 0), 0);
+    const mortalityRate = Number(b.initial_quantity) > 0 ? (mortality / Number(b.initial_quantity)) * 100 : 0;
+
+    const notes = dailyNotes.filter(n => n.batch_id === b.batch_id);
+    const totalFeedCost = notes.reduce((s, n) => s + Number(n.feed_cost_ugx || 0), 0);
+    const totalEggs = notes.reduce((s, n) => s + Number(n.eggs_produced || 0), 0);
+    const feedCostPerBird = Number(b.current_active_quantity) > 0 ? totalFeedCost / Number(b.current_active_quantity) : 0;
+
+    return { ...b, revenue, totalCost, netPosition, roiPct, mortality, mortalityRate, totalFeedCost, totalEggs, feedCostPerBird };
+  });
+
+  // --- Monthly P&L trend ---
+  const monthly = {};
+  ledger.forEach(l => {
+    const month = new Date(l.timestamp).toISOString().slice(0, 7); // YYYY-MM
+    if (!monthly[month]) monthly[month] = { revenue: 0, expenditure: 0 };
+    if (l.category === "Revenue") monthly[month].revenue += Number(l.amount_ugx || 0);
+    if (l.category === "Expenditure" || l.category === "AssetLoss") monthly[month].expenditure += Number(l.amount_ugx || 0);
+  });
+  const months = Object.keys(monthly).sort();
+
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Batch Performance</div>
+        <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+          Net position = revenue + current asset value − (purchase cost + recorded expenditure/losses). ROI is net position over total cost.
+        </p>
+        <table>
+          <thead><tr><th>Batch</th><th>Revenue</th><th>Total Cost</th><th>Net</th><th>ROI</th><th>Mortality</th><th>Feed/bird</th><th>Eggs (total)</th></tr></thead>
+          <tbody>
+            {batchReports.map(b => (
+              <tr key={b.batch_id}>
+                <td>{b.label}</td>
+                <td className="amount">{fmtUgx(b.revenue)}</td>
+                <td className="amount">{fmtUgx(b.totalCost)}</td>
+                <td className={"amount " + (b.netPosition >= 0 ? "pos" : "neg")}>{fmtUgx(b.netPosition)}</td>
+                <td className={"mono " + (b.roiPct >= 0 ? "pos" : "neg")}>{b.roiPct.toFixed(1)}%</td>
+                <td className="mono">{b.mortalityRate.toFixed(1)}% ({b.mortality})</td>
+                <td className="amount">{fmtUgx(Math.round(b.feedCostPerBird))}</td>
+                <td className="mono">{b.totalEggs}</td>
+              </tr>
+            ))}
+            {batchReports.length === 0 && <tr><td colSpan="8" className="empty">No batches yet — reports will populate as you log data.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <div className="section-title">Monthly Cash Flow</div>
+        <table>
+          <thead><tr><th>Month</th><th>Revenue</th><th>Expenditure &amp; Losses</th><th>Net</th></tr></thead>
+          <tbody>
+            {months.map(m => {
+              const row = monthly[m];
+              const net = row.revenue - row.expenditure;
+              return (
+                <tr key={m}>
+                  <td>{m}</td>
+                  <td className="amount pos">{fmtUgx(row.revenue)}</td>
+                  <td className="amount neg">{fmtUgx(row.expenditure)}</td>
+                  <td className={"amount " + (net >= 0 ? "pos" : "neg")}>{fmtUgx(net)}</td>
+                </tr>
+              );
+            })}
+            {months.length === 0 && <tr><td colSpan="4" className="empty">No transactions yet.</td></tr>}
+          </tbody>
+        </table>
+        <p style={{fontSize:12,color:"var(--text-muted)",marginTop:10}}>
+          This trend gets more useful the longer the group records consistently — a few months of data will start showing seasonality.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function Ideas({ data, me, isOwner, ownerPassword, doAction }) {
+  const [form, setForm] = useState({ title: "", description: "" });
+  const statuses = ["New", "Planned", "Done", "Rejected"];
+
+  const submit = async () => {
+    if (!me || !form.title) return;
+    await doAction({ action: "addIdea", submittedBy: me, title: form.title, description: form.description });
+    setForm({ title: "", description: "" });
+  };
+
+  const setStatus = (ideaId, status) => doAction({ action: "updateIdeaStatus", ownerPassword, ownerName: "Owner", ideaId, status });
+
+  const backlog = (data.backlog || []).slice().reverse();
+
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Drop a New Idea</div>
+        {!me && <p style={{fontSize:12,color:"var(--text-muted)"}}>Select your name at the top right first.</p>}
+        <div className="field"><label>Title</label><input value={form.title} onChange={e => setForm({...form, title: e.target.value})} placeholder="e.g. Add loan tracking module" /></div>
+        <div className="field"><label>Description (optional)</label><textarea rows="3" value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
+        <button className="btn gold" disabled={!me || !form.title} onClick={submit}>Add to backlog</button>
+      </div>
+
+      <div className="card">
+        <div className="section-title">Backlog</div>
+        <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+          Ideas land here instantly without touching code. Batch a few related "Planned" items together for the next deploy instead of rebuilding one at a time.
+        </p>
+        <table>
+          <thead><tr><th>Title</th><th>Description</th><th>By</th><th>Status</th>{isOwner && <th>Set status</th>}</tr></thead>
+          <tbody>
+            {backlog.map(idea => {
+              const member = (data.members || []).find(m => m.member_id === idea.submitted_by);
+              return (
+                <tr key={idea.idea_id}>
+                  <td>{idea.title}</td>
+                  <td style={{color:"var(--text-muted)"}}>{idea.description}</td>
+                  <td>{member ? member.full_name : idea.submitted_by}</td>
+                  <td><span className={"stamp " + idea.status}>{idea.status}</span></td>
+                  {isOwner && (
+                    <td>
+                      <select value={idea.status} onChange={e => setStatus(idea.idea_id, e.target.value)}>
+                        {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+            {backlog.length === 0 && <tr><td colSpan={isOwner ? 5 : 4} className="empty">No ideas yet — the next one you think of goes here.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Settings({ data, isOwner, ownerPassword, setOwnerPassword, doAction }) {
+  const [pwInput, setPwInput] = useState("");
+  const [newCatKey, setNewCatKey] = useState("LedgerCategories");
+  const [newCatValue, setNewCatValue] = useState(data.config.LedgerCategories || "");
+  const [newPassword, setNewPassword] = useState("");
+
+  const unlock = () => setOwnerPassword(pwInput);
+  const lock = () => setOwnerPassword("");
+
+  const saveConfig = () => doAction({ action: "updateConfig", ownerPassword, ownerName: "Owner", key: newCatKey, value: newCatValue, reason: "Updated via Settings" });
+  const rotatePassword = async () => {
+    await doAction({ action: "changeOwnerPassword", ownerPassword, ownerName: "Owner", newPassword });
+    setOwnerPassword(newPassword);
+    setNewPassword("");
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Owner Access</div>
+        {!isOwner ? (
+          <div className="form-grid" style={{alignItems:"end"}}>
+            <div className="field"><label>Owner password</label><input type="password" value={pwInput} onChange={e => setPwInput(e.target.value)} /></div>
+            <button className="btn gold" onClick={unlock}>Unlock</button>
+          </div>
+        ) : (
+          <div>
+            <p style={{fontSize:13}}>Owner mode is unlocked on this device. This controls who can add members, batches, and change configuration — see the design doc's §4 for the full model.</p>
+            <button className="btn ghost" onClick={lock}>Lock owner mode</button>
+          </div>
+        )}
+      </div>
+
+      <OwnerGate ownerPassword={ownerPassword} isOwner={isOwner}>
+        <div className="card">
+          <div className="section-title">Extend the System (Config)</div>
+          <p style={{fontSize:12,color:"var(--text-muted)"}}>Edit these comma-separated lists to add new ledger categories or health event types without touching code. The frontend reads these dynamically.</p>
+          <div className="form-grid">
+            <div className="field"><label>Config key</label>
+              <select value={newCatKey} onChange={e => { setNewCatKey(e.target.value); setNewCatValue(data.config[e.target.value] || ""); }}>
+                <option value="LedgerCategories">LedgerCategories</option>
+                <option value="HealthEventTypes">HealthEventTypes</option>
+                <option value="Roles">Roles</option>
+              </select>
+            </div>
+            <div className="field"><label>Value (comma-separated)</label><input value={newCatValue} onChange={e => setNewCatValue(e.target.value)} /></div>
+          </div>
+          <button className="btn gold" onClick={saveConfig}>Save config</button>
+        </div>
+
+        <div className="card">
+          <div className="section-title">Rotate Owner Password</div>
+          <div className="form-grid">
+            <div className="field"><label>New owner password</label><input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} /></div>
+            <button className="btn gold" disabled={!newPassword} onClick={rotatePassword}>Update password</button>
+          </div>
+        </div>
+      </OwnerGate>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
 </html>
-
-                
-            
