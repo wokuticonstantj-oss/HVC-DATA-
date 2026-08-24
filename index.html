@@ -104,9 +104,8 @@ async function callApi(payload) {
   return data;
 }
 
-async function fetchAll() {
-  const res = await fetch(GAS_URL);
-  return res.json();
+async function fetchAll(session, ownerPassword) {
+  return callApi({ action: "getAll", sessionToken: session ? session.token : "", ownerPassword: ownerPassword || "" });
 }
 
 function useToast() {
@@ -118,27 +117,38 @@ function useToast() {
   return [toast, show];
 }
 
+function loadSession() {
+  try { return JSON.parse(localStorage.getItem("hvc_session") || "null"); } catch (e) { return null; }
+}
+
 function App() {
   const [data, setData] = useState(null);
   const [view, setView] = useState("overview");
-  const [me, setMe] = useState(() => localStorage.getItem("hvc_me") || "");
+  const [session, setSession] = useState(loadSession);
   const [ownerPassword, setOwnerPassword] = useState(() => sessionStorage.getItem("hvc_owner_pw") || "");
   const [toast, showToast] = useToast();
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(() => {
-    fetchAll().then(d => { setData(d); setLoading(false); }).catch(e => showToast(String(e), true));
-  }, [showToast]);
+    if (!session && !ownerPassword) { setLoading(false); return; }
+    fetchAll(session, ownerPassword)
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => {
+        setLoading(false);
+        if (/log in|session/i.test(String(e.message))) { setSession(null); localStorage.removeItem("hvc_session"); }
+        showToast(String(e.message || e), true);
+      });
+  }, [session, ownerPassword, showToast]);
 
   useEffect(() => { refresh(); const t = setInterval(refresh, 30000); return () => clearInterval(t); }, [refresh]);
-  useEffect(() => { localStorage.setItem("hvc_me", me); }, [me]);
   useEffect(() => { sessionStorage.setItem("hvc_owner_pw", ownerPassword); }, [ownerPassword]);
+  useEffect(() => { localStorage.setItem("hvc_session", session ? JSON.stringify(session) : ""); }, [session]);
 
   const isOwner = !!ownerPassword; // verified server-side on every owner action, this just tracks "entered"
 
   const doAction = async (payload) => {
     try {
-      const res = await callApi(payload);
+      const res = await callApi(Object.assign({ sessionToken: session ? session.token : "" }, payload));
       refresh();
       showToast("Saved.");
       return res;
@@ -148,11 +158,16 @@ function App() {
     }
   };
 
+  const logout = () => { setSession(null); setData(null); localStorage.removeItem("hvc_session"); };
+
+  if (!session) {
+    return <Login onLoggedIn={(s) => { setSession(s); }} showToast={showToast} toast={toast} />;
+  }
+
   if (loading) return <div className="main"><p>Loading HVC dashboard…</p></div>;
   if (!data) return <div className="main"><p>Could not reach the backend. Check GAS_URL at the top of the script.</p></div>;
 
-  const members = data.members || [];
-  const activeMembers = members.filter(m => m.status === "Active");
+  const me = session.memberId;
 
   const nav = [
     ["overview", "Overview"],
@@ -179,11 +194,8 @@ function App() {
         <div className="topbar">
           <h1 className="page-title">{nav.find(n => n[0] === view)[1]}</h1>
           <div className="who">
-            Recording as{" "}
-            <select value={me} onChange={e => setMe(e.target.value)}>
-              <option value="">— select your name —</option>
-              {activeMembers.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
-            </select>
+            Signed in as <b>{session.fullName}</b> ({session.role}){" "}
+            <button className="btn ghost" onClick={logout}>Log out</button>
           </div>
         </div>
 
@@ -193,10 +205,68 @@ function App() {
         {view === "batches" && <Batches data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "reports" && <Reports data={data} />}
         {view === "ideas" && <Ideas data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
-        {view === "settings" && <Settings data={data} isOwner={isOwner} ownerPassword={ownerPassword} setOwnerPassword={setOwnerPassword} doAction={doAction} />}
+        {view === "settings" && <Settings data={data} session={session} isOwner={isOwner} ownerPassword={ownerPassword} setOwnerPassword={setOwnerPassword} doAction={doAction} />}
 
         {toast && <div className={"toast" + (toast.isError ? " error" : "")}>{toast.message}</div>}
       </div>
+    </div>
+  );
+}
+
+function Login({ onLoggedIn, showToast, toast }) {
+  const [memberId, setMemberId] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [pin, setPin] = useState("");
+  const [members, setMembers] = useState(null);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+
+  // The member picker needs names, but names are only available via a
+  // logged-in session — so we bootstrap it from whatever the person types,
+  // matched by name, rather than exposing an open member list.
+  // Simplify: ask for name text; backend matches on member_id normally,
+  // so we resolve name -> member_id via a lightweight lookup action.
+  const [step, setStep] = useState("name"); // name -> pin
+
+  const findMember = async () => {
+    try {
+      const res = await callApi({ action: "resolveMemberByName", fullName });
+      setMemberId(res.memberId);
+      setStep("pin");
+    } catch (e) {
+      showToast(String(e.message || e), true);
+    }
+  };
+
+  const submitPin = async () => {
+    try {
+      const res = await callApi({ action: "login", memberId, pin });
+      onLoggedIn({ token: res.token, memberId: res.memberId, fullName: res.fullName, role: res.role });
+    } catch (e) {
+      showToast(String(e.message || e), true);
+    }
+  };
+
+  return (
+    <div style={{maxWidth:360,margin:"60px auto",padding:"0 20px"}}>
+      <div className="brand-title" style={{color:"var(--ink)",fontSize:28,marginBottom:4}}>HVC</div>
+      <div style={{color:"var(--text-muted)",fontSize:13,marginBottom:24}}>Harembe Viewer's Corporation — sign in</div>
+      <div className="card">
+        {step === "name" && (
+          <div>
+            <div className="field"><label>Your full name (as registered)</label><input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="e.g. Wokuti Constant" /></div>
+            <button className="btn gold" disabled={!fullName} onClick={findMember}>Continue</button>
+          </div>
+        )}
+        {step === "pin" && (
+          <div>
+            <div className="field"><label>PIN</label><input type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} /></div>
+            <button className="btn gold" disabled={!pin} onClick={submitPin}>Sign in</button>{" "}
+            <button className="btn ghost" onClick={() => setStep("name")}>Back</button>
+          </div>
+        )}
+      </div>
+      <p style={{fontSize:12,color:"var(--text-muted)",marginTop:14}}>Forgot your PIN? Ask the Chairman to reset it from Settings.</p>
+      {toast && <div className={"toast" + (toast.isError ? " error" : "")}>{toast.message}</div>}
     </div>
   );
 }
@@ -247,33 +317,96 @@ function OwnerGate({ ownerPassword, isOwner, children }) {
 }
 
 function Members({ data, isOwner, ownerPassword, doAction }) {
-  const [form, setForm] = useState({ fullName: "", role: "Member", shareCapitalUgx: "" });
+  const [form, setForm] = useState({ fullName: "", role: "Member", shareCapitalUgx: "", pin: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
+  const [lastIssuedPin, setLastIssuedPin] = useState(null);
   const roles = (data.config.Roles || "").split(",");
+  const statuses = ["Active", "Suspended", "Archived"];
 
   const submit = async () => {
-    await doAction({ action: "addMember", ownerPassword, ownerName: "Owner", fullName: form.fullName, role: form.role, shareCapitalUgx: Number(form.shareCapitalUgx) });
-    setForm({ fullName: "", role: "Member", shareCapitalUgx: "" });
+    const res = await doAction({ action: "addMember", ownerPassword, ownerName: "Owner", fullName: form.fullName, role: form.role, shareCapitalUgx: Number(form.shareCapitalUgx), pin: form.pin || undefined });
+    if (res && res.initialPin) setLastIssuedPin({ name: form.fullName, pin: res.initialPin });
+    setForm({ fullName: "", role: "Member", shareCapitalUgx: "", pin: "" });
+  };
+
+  const resetPin = async (m) => {
+    const res = await doAction({ action: "resetMemberPin", ownerPassword, ownerName: "Owner", memberId: m.member_id });
+    if (res && res.newPin) setLastIssuedPin({ name: m.full_name, pin: res.newPin });
+  };
+
+  const startEdit = (m) => {
+    setEditingId(m.member_id);
+    setEditForm({ full_name: m.full_name, role: m.role, share_capital_ugx: m.share_capital_ugx, status: m.status });
+  };
+
+  const saveEdit = async (memberId) => {
+    await doAction({
+      action: "updateMember",
+      ownerPassword,
+      ownerName: "Owner",
+      memberId,
+      fields: {
+        full_name: editForm.full_name,
+        role: editForm.role,
+        share_capital_ugx: Number(editForm.share_capital_ugx),
+        status: editForm.status
+      },
+      reason: "Corrected via Members edit"
+    });
+    setEditingId(null);
   };
 
   return (
     <div>
       <div className="card">
         <div className="section-title">Members</div>
+        {isOwner && <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+          Made a mistake entering someone? Tap Edit to correct name, role, capital, or set status to Archived to remove a duplicate from equity calculations without deleting its history.
+        </p>}
         <table>
-          <thead><tr><th>Name</th><th>Role</th><th>Capital</th><th>Equity</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Role</th><th>Capital</th><th>Equity</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
           <tbody>
             {(data.members || []).map(m => (
-              <tr key={m.member_id}>
-                <td>{m.full_name}</td>
-                <td><span className="badge-role">{m.role}</span></td>
-                <td className="amount">{fmtUgx(m.share_capital_ugx)}</td>
-                <td className="mono">{(Number(m.equity_bps) / 100).toFixed(2)}%</td>
-                <td>{m.status}</td>
-              </tr>
+              editingId === m.member_id ? (
+                <tr key={m.member_id}>
+                  <td><input value={editForm.full_name} onChange={e => setEditForm({...editForm, full_name: e.target.value})} /></td>
+                  <td>
+                    <select value={editForm.role} onChange={e => setEditForm({...editForm, role: e.target.value})}>
+                      {roles.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </td>
+                  <td><input type="number" value={editForm.share_capital_ugx} onChange={e => setEditForm({...editForm, share_capital_ugx: e.target.value})} /></td>
+                  <td className="mono">{(Number(m.equity_bps) / 100).toFixed(2)}%</td>
+                  <td>
+                    <select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})}>
+                      {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <button className="btn gold" onClick={() => saveEdit(m.member_id)}>Save</button>{" "}
+                    <button className="btn ghost" onClick={() => setEditingId(null)}>Cancel</button>
+                  </td>
+                </tr>
+              ) : (
+                <tr key={m.member_id}>
+                  <td>{m.full_name}</td>
+                  <td><span className="badge-role">{m.role}</span></td>
+                  <td className="amount">{m.share_capital_ugx === null ? "—" : fmtUgx(m.share_capital_ugx)}</td>
+                  <td className="mono">{m.equity_bps === null ? "—" : (Number(m.equity_bps) / 100).toFixed(2) + "%"}</td>
+                  <td>{m.status}</td>
+                  {isOwner && <td><button className="btn ghost" onClick={() => startEdit(m)}>Edit</button> <button className="btn ghost" onClick={() => resetPin(m)}>Reset PIN</button></td>}
+                </tr>
+              )
             ))}
           </tbody>
         </table>
       </div>
+      {lastIssuedPin && (
+        <div className="owner-lock">
+          PIN for <b>{lastIssuedPin.name}</b>: <span className="mono" style={{fontSize:16}}>{lastIssuedPin.pin}</span> — relay this to them privately (WhatsApp/SMS/in person). It won't be shown again.
+        </div>
+      )}
       <div className="card">
         <div className="section-title">Add Member</div>
         <OwnerGate ownerPassword={ownerPassword} isOwner={isOwner}>
@@ -285,6 +418,7 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
               </select>
             </div>
             <div className="field"><label>Initial share capital (UGX)</label><input type="number" value={form.shareCapitalUgx} onChange={e => setForm({...form, shareCapitalUgx: e.target.value})} /></div>
+            <div className="field"><label>PIN (optional — leave blank to auto-generate)</label><input value={form.pin} onChange={e => setForm({...form, pin: e.target.value})} placeholder="e.g. 4821" /></div>
           </div>
           <button className="btn gold" disabled={!form.fullName} onClick={submit}>Add member</button>
         </OwnerGate>
@@ -299,7 +433,7 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
 
   const submit = async () => {
     if (!me) return;
-    await doAction({ action: "addLedgerEntry", recordedBy: me, category: form.category, amountUgx: Number(form.amountUgx), description: form.description });
+    await doAction({ action: "addLedgerEntry", category: form.category, amountUgx: Number(form.amountUgx), description: form.description });
     setForm({ category: categories[0] || "", amountUgx: "", description: "" });
   };
 
@@ -360,7 +494,7 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
 
   const addLog = async () => {
     if (!me || !logForm.batchId) return;
-    await doAction({ action: "addHealthLog", recordedBy: me, batchId: logForm.batchId, eventType: logForm.eventType, quantityAffected: Number(logForm.quantityAffected || 0), notes: logForm.notes });
+    await doAction({ action: "addHealthLog", batchId: logForm.batchId, eventType: logForm.eventType, quantityAffected: Number(logForm.quantityAffected || 0), notes: logForm.notes });
     setLogForm({ batchId: "", eventType: "", quantityAffected: "", notes: "" });
   };
 
@@ -522,7 +656,7 @@ function Ideas({ data, me, isOwner, ownerPassword, doAction }) {
 
   const submit = async () => {
     if (!me || !form.title) return;
-    await doAction({ action: "addIdea", submittedBy: me, title: form.title, description: form.description });
+    await doAction({ action: "addIdea", title: form.title, description: form.description });
     setForm({ title: "", description: "" });
   };
 
@@ -574,11 +708,13 @@ function Ideas({ data, me, isOwner, ownerPassword, doAction }) {
   );
 }
 
-function Settings({ data, isOwner, ownerPassword, setOwnerPassword, doAction }) {
+function Settings({ data, session, isOwner, ownerPassword, setOwnerPassword, doAction }) {
   const [pwInput, setPwInput] = useState("");
   const [newCatKey, setNewCatKey] = useState("LedgerCategories");
   const [newCatValue, setNewCatValue] = useState(data.config.LedgerCategories || "");
   const [newPassword, setNewPassword] = useState("");
+  const [oldPin, setOldPin] = useState("");
+  const [newPin, setNewPin] = useState("");
 
   const unlock = () => setOwnerPassword(pwInput);
   const lock = () => setOwnerPassword("");
@@ -589,9 +725,21 @@ function Settings({ data, isOwner, ownerPassword, setOwnerPassword, doAction }) 
     setOwnerPassword(newPassword);
     setNewPassword("");
   };
+  const changePin = async () => {
+    await doAction({ action: "changeMyPin", memberId: session.memberId, oldPin, newPin });
+    setOldPin(""); setNewPin("");
+  };
 
   return (
     <div>
+      <div className="card">
+        <div className="section-title">My PIN</div>
+        <div className="form-grid">
+          <div className="field"><label>Current PIN</label><input type="password" inputMode="numeric" value={oldPin} onChange={e => setOldPin(e.target.value)} /></div>
+          <div className="field"><label>New PIN</label><input type="password" inputMode="numeric" value={newPin} onChange={e => setNewPin(e.target.value)} /></div>
+        </div>
+        <button className="btn gold" disabled={!oldPin || !newPin} onClick={changePin}>Update my PIN</button>
+      </div>
       <div className="card">
         <div className="section-title">Owner Access</div>
         {!isOwner ? (
