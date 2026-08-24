@@ -483,19 +483,19 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
 }
 
 function Batches({ data, me, isOwner, ownerPassword, doAction }) {
-  const [form, setForm] = useState({ label: "", initialQuantity: "", purchaseCostUgx: "" });
-  const [logForm, setLogForm] = useState({ batchId: "", eventType: "", quantityAffected: "", notes: "" });
+  const [form, setForm] = useState({ label: "", initialQuantity: "", purchaseCostUgx: "", startDate: "" });
+  const [logForm, setLogForm] = useState({ batchId: "", eventType: "", quantityAffected: "", notes: "", eventDate: "" });
   const eventTypes = (data.config.HealthEventTypes || "").split(",");
 
   const addBatch = async () => {
-    await doAction({ action: "addBatch", ownerPassword, ownerName: "Owner", label: form.label, initialQuantity: Number(form.initialQuantity), purchaseCostUgx: Number(form.purchaseCostUgx) });
-    setForm({ label: "", initialQuantity: "", purchaseCostUgx: "" });
+    await doAction({ action: "addBatch", ownerPassword, ownerName: "Owner", label: form.label, initialQuantity: Number(form.initialQuantity), purchaseCostUgx: Number(form.purchaseCostUgx), startDate: form.startDate || undefined });
+    setForm({ label: "", initialQuantity: "", purchaseCostUgx: "", startDate: "" });
   };
 
   const addLog = async () => {
     if (!me || !logForm.batchId) return;
-    await doAction({ action: "addHealthLog", batchId: logForm.batchId, eventType: logForm.eventType, quantityAffected: Number(logForm.quantityAffected || 0), notes: logForm.notes });
-    setLogForm({ batchId: "", eventType: "", quantityAffected: "", notes: "" });
+    await doAction({ action: "addHealthLog", batchId: logForm.batchId, eventType: logForm.eventType, quantityAffected: Number(logForm.quantityAffected || 0), notes: logForm.notes, eventDate: logForm.eventDate || undefined });
+    setLogForm({ batchId: "", eventType: "", quantityAffected: "", notes: "", eventDate: "" });
   };
 
   return (
@@ -528,6 +528,7 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
             <div className="field"><label>Label (e.g. "June Birds")</label><input value={form.label} onChange={e => setForm({...form, label: e.target.value})} /></div>
             <div className="field"><label>Initial quantity</label><input type="number" value={form.initialQuantity} onChange={e => setForm({...form, initialQuantity: e.target.value})} /></div>
             <div className="field"><label>Purchase cost (UGX)</label><input type="number" value={form.purchaseCostUgx} onChange={e => setForm({...form, purchaseCostUgx: e.target.value})} /></div>
+            <div className="field"><label>Start date (leave blank for today)</label><input type="date" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})} /></div>
           </div>
           <button className="btn gold" disabled={!form.label} onClick={addBatch}>Create batch</button>
         </OwnerGate>
@@ -550,6 +551,7 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
             </select>
           </div>
           <div className="field"><label>Quantity affected</label><input type="number" value={logForm.quantityAffected} onChange={e => setLogForm({...logForm, quantityAffected: e.target.value})} /></div>
+          <div className="field"><label>When did this happen? (leave blank for today)</label><input type="date" value={logForm.eventDate} onChange={e => setLogForm({...logForm, eventDate: e.target.value})} /></div>
           <div className="field"><label>Notes</label><input value={logForm.notes} onChange={e => setLogForm({...logForm, notes: e.target.value})} /></div>
         </div>
         <button className="btn gold" disabled={!me || !logForm.batchId || !logForm.eventType} onClick={addLog}>Log event</button>
