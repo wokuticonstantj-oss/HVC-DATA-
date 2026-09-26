@@ -72,6 +72,7 @@
   .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
   .section-title{font-family:'Fraunces',serif;font-size:16px;font-weight:600;margin:0 0 12px;}
   .owner-lock{background:var(--gold-soft);border:1px solid var(--gold);border-radius:8px;padding:14px;margin-bottom:16px;font-size:13px;}
+  .offline-banner{background:#F3E6D8;border:1px solid var(--rust);color:var(--rust);border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:13px;display:flex;align-items:center;flex-wrap:wrap;}
   .badge-role{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;padding:2px 7px;border-radius:4px;background:var(--gold-soft);color:var(--rust);}
   .empty{color:var(--text-muted);font-size:13px;padding:16px 0;text-align:center;}
   .toast{position:fixed;bottom:20px;right:20px;background:var(--ink);color:#fff;padding:12px 18px;border-radius:8px;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:50;}
@@ -91,6 +92,15 @@ const GAS_URL = "https://script.google.com/macros/s/AKfycbxeBkVesEqqiWbysuit8OQx
 function fmtUgx(n) {
   const v = Number(n) || 0;
   return "UGX " + v.toLocaleString("en-UG");
+}
+
+function fmtSyncTime(ts) {
+  if (!ts) return "an earlier session";
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return sameDay ? time + " today" : d.toLocaleDateString() + " " + time;
 }
 
 async function callApi(payload) {
@@ -128,17 +138,49 @@ function App() {
   const [ownerPassword, setOwnerPassword] = useState(() => sessionStorage.getItem("hvc_owner_pw") || "");
   const [toast, showToast] = useToast();
   const [loading, setLoading] = useState(true);
+  const [offline, setOffline] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState(null);
+
+  const cacheKey = "hvc_cache_" + (session ? session.memberId : "owner");
+
+  const isNetworkFailure = (e) => {
+    // A real connectivity failure throws before any server response exists —
+    // fetch() itself rejects with TypeError (Chrome/Firefox) or "Load failed"
+    // (Safari). A server-returned error (bad PIN, expired session, etc.)
+    // means the request DID reach the internet, so it's not a "go offline" case.
+    return e instanceof TypeError || /failed to fetch|network|load failed/i.test(String(e.message || e));
+  };
 
   const refresh = useCallback(() => {
     if (!session && !ownerPassword) { setLoading(false); return; }
     fetchAll(session, ownerPassword)
-      .then(d => { setData(d); setLoading(false); })
+      .then(d => {
+        setData(d);
+        setLoading(false);
+        setOffline(false);
+        const syncedAt = Date.now();
+        setLastSyncedAt(syncedAt);
+        try { localStorage.setItem(cacheKey, JSON.stringify({ data: d, syncedAt })); } catch (e) { /* storage full — non-fatal, just skip caching */ }
+      })
       .catch(e => {
         setLoading(false);
+        if (isNetworkFailure(e)) {
+          let cached = null;
+          try { cached = JSON.parse(localStorage.getItem(cacheKey) || "null"); } catch (err) { /* ignore corrupt cache */ }
+          if (cached) {
+            setData(cached.data);
+            setOffline(true);
+            setLastSyncedAt(cached.syncedAt);
+            return; // showing cached data — no error toast needed, the banner covers it
+          }
+          showToast("You're offline and there's no saved data yet on this device.", true);
+          return;
+        }
+        // A real server-side error (not connectivity) — e.g. expired session
         if (/log in|session/i.test(String(e.message))) { setSession(null); localStorage.removeItem("hvc_session"); }
         showToast(String(e.message || e), true);
       });
-  }, [session, ownerPassword, showToast]);
+  }, [session, ownerPassword, showToast, cacheKey]);
 
   useEffect(() => { refresh(); const t = setInterval(refresh, 30000); return () => clearInterval(t); }, [refresh]);
   useEffect(() => { sessionStorage.setItem("hvc_owner_pw", ownerPassword); }, [ownerPassword]);
@@ -153,7 +195,11 @@ function App() {
       showToast("Saved.");
       return res;
     } catch (e) {
-      showToast(String(e.message || e), true);
+      if (isNetworkFailure(e)) {
+        showToast("You're offline — connect to the internet to save this.", true);
+      } else {
+        showToast(String(e.message || e), true);
+      }
       throw e;
     }
   };
@@ -198,6 +244,13 @@ function App() {
             <button className="btn ghost" onClick={logout}>Log out</button>
           </div>
         </div>
+
+        {offline && (
+          <div className="offline-banner">
+            📡 Offline — showing data as of {fmtSyncTime(lastSyncedAt)}. New entries can't be saved until you're back online.
+            <button className="btn ghost" style={{marginLeft:10}} onClick={refresh}>Retry</button>
+          </div>
+        )}
 
         {view === "overview" && <Overview data={data} />}
         {view === "members" && <Members data={data} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
