@@ -221,6 +221,7 @@ function App() {
     ["ledger", "Financial Ledger"],
     ["batches", "Poultry Batches"],
     ["reports", "Reports"],
+    ["sharelots", "Share Lots"],
     ["ideas", "Ideas"],
     ["settings", "Settings"]
   ];
@@ -257,6 +258,7 @@ function App() {
         {view === "ledger" && <Ledger data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "batches" && <Batches data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "reports" && <Reports data={data} />}
+        {view === "sharelots" && <ShareLots data={data} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "ideas" && <Ideas data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "settings" && <Settings data={data} session={session} isOwner={isOwner} ownerPassword={ownerPassword} setOwnerPassword={setOwnerPassword} doAction={doAction} />}
 
@@ -390,7 +392,7 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
 
   const startEdit = (m) => {
     setEditingId(m.member_id);
-    setEditForm({ full_name: m.full_name, role: m.role, share_capital_ugx: m.share_capital_ugx, status: m.status });
+    setEditForm({ full_name: m.full_name, role: m.role, status: m.status });
   };
 
   const saveEdit = async (memberId) => {
@@ -402,7 +404,6 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
       fields: {
         full_name: editForm.full_name,
         role: editForm.role,
-        share_capital_ugx: Number(editForm.share_capital_ugx),
         status: editForm.status
       },
       reason: "Corrected via Members edit"
@@ -415,7 +416,7 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
       <div className="card">
         <div className="section-title">Members</div>
         {isOwner && <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
-          Made a mistake entering someone? Tap Edit to correct name, role, capital, or set status to Archived to remove a duplicate from equity calculations without deleting its history.
+          Made a mistake entering someone's name or role? Tap Edit here, or set status to Archived to remove a duplicate from equity calculations without deleting its history. Capital is managed in the Share Lots tab, not here — it's a derived total of each member's lots.
         </p>}
         <table>
           <thead><tr><th>Name</th><th>Role</th><th>Capital</th><th>Equity</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
@@ -429,7 +430,7 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
                       {roles.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </td>
-                  <td><input type="number" value={editForm.share_capital_ugx} onChange={e => setEditForm({...editForm, share_capital_ugx: e.target.value})} /></td>
+                  <td className="amount">{m.share_capital_ugx === null ? "—" : fmtUgx(m.share_capital_ugx)}</td>
                   <td className="mono">{(Number(m.equity_bps) / 100).toFixed(2)}%</td>
                   <td>
                     <select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})}>
@@ -763,6 +764,136 @@ function Ideas({ data, me, isOwner, ownerPassword, doAction }) {
   );
 }
 
+function ShareLots({ data, isOwner, ownerPassword, doAction }) {
+  const activeMembers = (data.members || []).filter(m => m.status === "Active");
+  const lots = data.shareLots || [];
+  const memberName = (id) => { const m = (data.members || []).find(x => x.member_id === id); return m ? m.full_name : id; };
+
+  const [xfer, setXfer] = useState({ sellingMemberId: "", buyerMemberId: "", amountUgx: "", pricePaidUgx: "", resaleTerms: "", settlementTerms: "", notes: "" });
+  const [lastTransferLotId, setLastTransferLotId] = useState(null);
+  const submitTransfer = async () => {
+    const res = await doAction({
+      action: "transferShares", ownerPassword, ownerName: "Owner",
+      sellingMemberId: xfer.sellingMemberId, buyerMemberId: xfer.buyerMemberId,
+      amountUgx: Number(xfer.amountUgx), pricePaidUgx: xfer.pricePaidUgx ? Number(xfer.pricePaidUgx) : undefined,
+      resaleTerms: xfer.resaleTerms || undefined, settlementTerms: xfer.settlementTerms || undefined, notes: xfer.notes
+    });
+    if (res && res.lot_id) setLastTransferLotId(res.lot_id);
+    setXfer({ sellingMemberId: "", buyerMemberId: "", amountUgx: "", pricePaidUgx: "", resaleTerms: "", settlementTerms: "", notes: "" });
+  };
+
+  const [topup, setTopup] = useState({ lotId: "", addAmountUgx: "", additionalPricePaidUgx: "", reason: "" });
+  const submitTopup = async () => {
+    await doAction({
+      action: "adjustShareLot", ownerPassword, ownerName: "Owner",
+      lotId: topup.lotId, addAmountUgx: Number(topup.addAmountUgx),
+      additionalPricePaidUgx: topup.additionalPricePaidUgx ? Number(topup.additionalPricePaidUgx) : undefined,
+      reason: topup.reason
+    });
+    setTopup({ lotId: "", addAmountUgx: "", additionalPricePaidUgx: "", reason: "" });
+  };
+
+  const [newLot, setNewLot] = useState({ memberId: "", amountUgx: "", notes: "" });
+  const submitNewLot = async () => {
+    await doAction({ action: "addShareLot", ownerPassword, ownerName: "Owner", memberId: newLot.memberId, amountUgx: Number(newLot.amountUgx), notes: newLot.notes });
+    setNewLot({ memberId: "", amountUgx: "", notes: "" });
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Share Lots</div>
+        <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+          Each lot is an independently tracked slice of equity — its own source, price, and resale/settlement terms. A member's total capital is just the sum of their Active lots. Voting stays one-member-one-vote regardless of how many lots someone holds.
+        </p>
+        <table>
+          <thead><tr><th>Owner</th><th>Amount</th><th>Source</th><th>Acquired</th><th>From</th><th>Price paid</th><th>Status</th></tr></thead>
+          <tbody>
+            {lots.map(l => (
+              <tr key={l.lot_id}>
+                <td>{memberName(l.member_id)}</td>
+                <td className="amount">{fmtUgx(l.amount_ugx)}</td>
+                <td>{l.source}</td>
+                <td>{l.acquired_date}</td>
+                <td>{l.source_member_id ? memberName(l.source_member_id) : "—"}</td>
+                <td className="amount">{fmtUgx(l.price_paid_ugx)}</td>
+                <td><span className={"stamp " + (l.status === "Active" ? "Verified" : "Disputed")}>{l.status}</span></td>
+              </tr>
+            ))}
+            {lots.length === 0 && <tr><td colSpan="7" className="empty">No lots to show yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <OwnerGate ownerPassword={ownerPassword} isOwner={isOwner}>
+        <div className="card">
+          <div className="section-title">Transfer Shares (Buyout)</div>
+          <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+            Per Governance Manual Section 6.8 — moves equity between members directly, without touching HVC's own treasury. Requires full Board disclosure if the buyer is a sitting officer.
+          </p>
+          <div className="form-grid">
+            <div className="field"><label>Selling member (resigning)</label>
+              <select value={xfer.sellingMemberId} onChange={e => setXfer({...xfer, sellingMemberId: e.target.value})}>
+                <option value="">— choose —</option>
+                {(data.members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+              </select>
+            </div>
+            <div className="field"><label>Buyer</label>
+              <select value={xfer.buyerMemberId} onChange={e => setXfer({...xfer, buyerMemberId: e.target.value})}>
+                <option value="">— choose —</option>
+                {activeMembers.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+              </select>
+            </div>
+            <div className="field"><label>Equity amount being transferred (UGX)</label><input type="number" value={xfer.amountUgx} onChange={e => setXfer({...xfer, amountUgx: e.target.value})} /></div>
+            <div className="field"><label>Price actually paid (UGX, optional — defaults to amount)</label><input type="number" value={xfer.pricePaidUgx} onChange={e => setXfer({...xfer, pricePaidUgx: e.target.value})} /></div>
+            <div className="field"><label>Resale terms (optional)</label><input value={xfer.resaleTerms} onChange={e => setXfer({...xfer, resaleTerms: e.target.value})} placeholder="Standard Exit Policy applies if left blank" /></div>
+            <div className="field"><label>Settlement terms (optional)</label><input value={xfer.settlementTerms} onChange={e => setXfer({...xfer, settlementTerms: e.target.value})} placeholder="Standard Exit Policy applies if left blank" /></div>
+          </div>
+          <div className="field"><label>Notes (reason, Board approval reference, etc.)</label><input value={xfer.notes} onChange={e => setXfer({...xfer, notes: e.target.value})} /></div>
+          <button className="btn gold" disabled={!xfer.sellingMemberId || !xfer.buyerMemberId || !xfer.amountUgx} onClick={submitTransfer}>Execute transfer</button>
+          {lastTransferLotId && (
+            <p style={{fontSize:12,marginTop:10,color:"var(--text-muted)"}}>
+              New lot created: <span className="mono">{lastTransferLotId}</span> — copy this ID to use in "Top Up an Existing Lot" below if more balance needs adding to it.
+            </p>
+          )}
+        </div>
+
+        <div className="card">
+          <div className="section-title">Top Up an Existing Lot</div>
+          <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+            Use this to add a remaining balance into a specific lot that already exists — e.g. after a transfer, when the buyer's leftover contribution should grow that same acquired lot rather than start a new one.
+          </p>
+          <div className="form-grid">
+            <div className="field"><label>Lot ID</label><input value={topup.lotId} onChange={e => setTopup({...topup, lotId: e.target.value})} placeholder="Paste the lot_id" /></div>
+            <div className="field"><label>Amount to add (UGX)</label><input type="number" value={topup.addAmountUgx} onChange={e => setTopup({...topup, addAmountUgx: e.target.value})} /></div>
+            <div className="field"><label>Additional price paid (optional — defaults to amount)</label><input type="number" value={topup.additionalPricePaidUgx} onChange={e => setTopup({...topup, additionalPricePaidUgx: e.target.value})} /></div>
+          </div>
+          <div className="field"><label>Reason</label><input value={topup.reason} onChange={e => setTopup({...topup, reason: e.target.value})} /></div>
+          <button className="btn gold" disabled={!topup.lotId || !topup.addAmountUgx} onClick={submitTopup}>Add to lot</button>
+        </div>
+
+        <div className="card">
+          <div className="section-title">New Contribution (separate lot)</div>
+          <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+            For a fresh contribution unrelated to any transfer — creates a brand-new Organic lot for an existing member.
+          </p>
+          <div className="form-grid">
+            <div className="field"><label>Member</label>
+              <select value={newLot.memberId} onChange={e => setNewLot({...newLot, memberId: e.target.value})}>
+                <option value="">— choose —</option>
+                {activeMembers.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+              </select>
+            </div>
+            <div className="field"><label>Amount (UGX)</label><input type="number" value={newLot.amountUgx} onChange={e => setNewLot({...newLot, amountUgx: e.target.value})} /></div>
+          </div>
+          <div className="field"><label>Notes</label><input value={newLot.notes} onChange={e => setNewLot({...newLot, notes: e.target.value})} /></div>
+          <button className="btn gold" disabled={!newLot.memberId || !newLot.amountUgx} onClick={submitNewLot}>Add contribution</button>
+        </div>
+      </OwnerGate>
+    </div>
+  );
+}
+
 function Settings({ data, session, isOwner, ownerPassword, setOwnerPassword, doAction }) {
   const [pwInput, setPwInput] = useState("");
   const [newCatKey, setNewCatKey] = useState("LedgerCategories");
@@ -783,6 +914,12 @@ function Settings({ data, session, isOwner, ownerPassword, setOwnerPassword, doA
   const changePin = async () => {
     await doAction({ action: "changeMyPin", memberId: session.memberId, oldPin, newPin });
     setOldPin(""); setNewPin("");
+  };
+
+  const [recomputeResult, setRecomputeResult] = useState(null);
+  const recomputeBatches = async () => {
+    const res = await doAction({ action: "recomputeAllBatches", ownerPassword, ownerName: "Owner" });
+    setRecomputeResult(res.results || []);
   };
 
   return (
@@ -833,6 +970,27 @@ function Settings({ data, session, isOwner, ownerPassword, setOwnerPassword, doA
             <div className="field"><label>New owner password</label><input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} /></div>
             <button className="btn gold" disabled={!newPassword} onClick={rotatePassword}>Update password</button>
           </div>
+        </div>
+
+        <div className="card">
+          <div className="section-title">Recompute Batch Quantities</div>
+          <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
+            Run this after manually editing or deleting rows directly in the Google Sheet — it recalculates every batch's active count fresh from HealthLog, no hand-counting needed.
+          </p>
+          <button className="btn gold" onClick={recomputeBatches}>Recompute all batches</button>
+          {recomputeResult && (
+            <table style={{marginTop:14}}>
+              <thead><tr><th>Batch</th><th>Active now</th></tr></thead>
+              <tbody>
+                {recomputeResult.map(r => (
+                  <tr key={r.batch_id}>
+                    <td>{r.label}</td>
+                    <td className={r.flagged ? "amount neg" : "amount"}>{r.active}{r.flagged ? " ⚠️ negative — check HealthLog" : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </OwnerGate>
     </div>
