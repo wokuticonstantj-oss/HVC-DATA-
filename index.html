@@ -483,15 +483,29 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
 
 function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
   const categories = (data.config.LedgerCategories || "").split(",");
-  const [form, setForm] = useState({ category: categories[0] || "", amountUgx: "", description: "" });
+  const [form, setForm] = useState({ category: categories[0] || "", amountUgx: "", description: "", relatedMemberId: "", transactionDate: "" });
 
   const submit = async () => {
     if (!me) return;
-    await doAction({ action: "addLedgerEntry", category: form.category, amountUgx: Number(form.amountUgx), description: form.description });
-    setForm({ category: categories[0] || "", amountUgx: "", description: "" });
+    await doAction({ action: "addLedgerEntry", category: form.category, amountUgx: Number(form.amountUgx), description: form.description, relatedMemberId: form.relatedMemberId || undefined, transactionDate: form.transactionDate || undefined });
+    setForm({ category: categories[0] || "", amountUgx: "", description: "", relatedMemberId: "", transactionDate: "" });
   };
 
   const verify = (id) => doAction({ action: "verifyTransaction", ownerPassword, ownerName: "Owner", transactionId: id });
+
+  const [fixingId, setFixingId] = useState(null);
+  const [fixMemberId, setFixMemberId] = useState("");
+  const saveFix = async (transactionId) => {
+    await doAction({ action: "setLedgerRelatedMember", ownerPassword, ownerName: "Owner", transactionId, relatedMemberId: fixMemberId, reason: "Corrected via Ledger table" });
+    setFixingId(null);
+  };
+
+  const [fixingDateId, setFixingDateId] = useState(null);
+  const [fixDate, setFixDate] = useState("");
+  const saveDateFix = async (transactionId) => {
+    await doAction({ action: "setLedgerDate", ownerPassword, ownerName: "Owner", transactionId, newDate: fixDate, reason: "Corrected via Ledger table" });
+    setFixingDateId(null);
+  };
 
   return (
     <div>
@@ -505,23 +519,64 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
             </select>
           </div>
           <div className="field"><label>Amount (UGX)</label><input type="number" value={form.amountUgx} onChange={e => setForm({...form, amountUgx: e.target.value})} /></div>
+          <div className="field"><label>Contributing/related member (optional)</label>
+            <select value={form.relatedMemberId} onChange={e => setForm({...form, relatedMemberId: e.target.value})}>
+              <option value="">— same as who's recording this —</option>
+              {(data.members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>When did this actually happen? (leave blank for today)</label><input type="date" value={form.transactionDate} onChange={e => setForm({...form, transactionDate: e.target.value})} /></div>
         </div>
         <div className="field"><label>Description</label><input value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
+        <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6}}>
+          "By" always shows whoever is logged in submitting this — that's an accountability record, not who the money is from. If you're entering someone else's contribution (e.g. the Chairman logging the MD's cash), set "Contributing/related member" above so the ledger shows whose money it actually is.
+        </p>
         <button className="btn gold" disabled={!me || !form.amountUgx} onClick={submit}>Record transaction</button>
       </div>
       <div className="card">
         <div className="section-title">All Transactions</div>
         <table>
-          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>By</th><th>Amount</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Entered by</th><th>Contribution from</th><th>Amount</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
           <tbody>
             {(data.ledger || []).slice().reverse().map(l => {
-              const member = (data.members || []).find(m => m.member_id === l.recorded_by);
+              const recorder = (data.members || []).find(m => m.member_id === l.recorded_by);
+              const contributor = (data.members || []).find(m => m.member_id === l.related_member_id);
               return (
                 <tr key={l.transaction_id}>
-                  <td>{new Date(l.timestamp).toLocaleDateString()}</td>
+                  <td>
+                    {fixingDateId === l.transaction_id ? (
+                      <span>
+                        <input type="date" value={fixDate} onChange={e => setFixDate(e.target.value)} style={{width:140}} />{" "}
+                        <button className="btn gold" onClick={() => saveDateFix(l.transaction_id)}>Save</button>{" "}
+                        <button className="btn ghost" onClick={() => setFixingDateId(null)}>Cancel</button>
+                      </span>
+                    ) : (
+                      <span>
+                        {new Date(l.timestamp).toLocaleDateString()}
+                        {isOwner && <button className="btn ghost" style={{marginLeft:6}} onClick={() => { setFixingDateId(l.transaction_id); setFixDate(new Date(l.timestamp).toISOString().slice(0,10)); }}>Fix</button>}
+                      </span>
+                    )}
+                  </td>
                   <td>{l.category}</td>
                   <td>{l.description}</td>
-                  <td>{member ? member.full_name : l.recorded_by}</td>
+                  <td>{recorder ? recorder.full_name : l.recorded_by}</td>
+                  <td>
+                    {fixingId === l.transaction_id ? (
+                      <span>
+                        <select value={fixMemberId} onChange={e => setFixMemberId(e.target.value)}>
+                          <option value="">— choose —</option>
+                          {(data.members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+                        </select>{" "}
+                        <button className="btn gold" onClick={() => saveFix(l.transaction_id)}>Save</button>{" "}
+                        <button className="btn ghost" onClick={() => setFixingId(null)}>Cancel</button>
+                      </span>
+                    ) : (
+                      <span>
+                        {contributor ? contributor.full_name : (l.related_member_id ? l.related_member_id : "—")}
+                        {isOwner && <button className="btn ghost" style={{marginLeft:6}} onClick={() => { setFixingId(l.transaction_id); setFixMemberId(l.related_member_id || ""); }}>Fix</button>}
+                      </span>
+                    )}
+                  </td>
                   <td className="amount">{fmtUgx(l.amount_ugx)}</td>
                   <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
                   {isOwner && <td>{l.verification_state === "Pending" && <button className="btn ghost" onClick={() => verify(l.transaction_id)}>Verify</button>}</td>}
