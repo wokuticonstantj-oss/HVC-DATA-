@@ -188,9 +188,16 @@ function App() {
 
   const isOwner = !!ownerPassword; // verified server-side on every owner action, this just tracks "entered"
 
-  const doAction = async (payload) => {
+  // optimisticUpdater(prevData) => newData — when provided, patches local
+  // state immediately from the change just made, instead of waiting on a
+  // full re-fetch of every sheet. refresh() still runs in the background to
+  // reconcile with the server, but the UI no longer visibly waits for it —
+  // that's what was making every "Fix" feel slow (write + full re-download,
+  // each a couple of seconds on Apps Script, happening back to back).
+  const doAction = async (payload, optimisticUpdater) => {
     try {
       const res = await callApi(Object.assign({ sessionToken: session ? session.token : "" }, payload));
+      if (optimisticUpdater) setData(prev => prev ? optimisticUpdater(prev) : prev);
       refresh();
       showToast("Saved.");
       return res;
@@ -496,14 +503,21 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
   const [fixingId, setFixingId] = useState(null);
   const [fixMemberId, setFixMemberId] = useState("");
   const saveFix = async (transactionId) => {
-    await doAction({ action: "setLedgerRelatedMember", ownerPassword, ownerName: "Owner", transactionId, relatedMemberId: fixMemberId, reason: "Corrected via Ledger table" });
+    await doAction(
+      { action: "setLedgerRelatedMember", ownerPassword, ownerName: "Owner", transactionId, relatedMemberId: fixMemberId, reason: "Corrected via Ledger table" },
+      (prev) => ({ ...prev, ledger: prev.ledger.map(l => l.transaction_id === transactionId ? { ...l, related_member_id: fixMemberId } : l) })
+    );
     setFixingId(null);
   };
 
   const [fixingDateId, setFixingDateId] = useState(null);
   const [fixDate, setFixDate] = useState("");
   const saveDateFix = async (transactionId) => {
-    await doAction({ action: "setLedgerDate", ownerPassword, ownerName: "Owner", transactionId, newDate: fixDate, reason: "Corrected via Ledger table" });
+    const newTimestamp = new Date(fixDate + 'T12:00:00').toISOString();
+    await doAction(
+      { action: "setLedgerDate", ownerPassword, ownerName: "Owner", transactionId, newDate: fixDate, reason: "Corrected via Ledger table" },
+      (prev) => ({ ...prev, ledger: prev.ledger.map(l => l.transaction_id === transactionId ? { ...l, timestamp: newTimestamp } : l) })
+    );
     setFixingDateId(null);
   };
 
