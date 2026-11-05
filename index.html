@@ -111,8 +111,12 @@ function computeCash(data) {
   const cashOut = listCfg(cfg.CashOutCategories, "Expenditure,Investment");
   const opening = Number(cfg.OpeningCashUgx || 0);
   let inflow = 0, outflow = 0;
+  // A row only counts as a reversal if it points at a real transaction in the
+  // ledger. A stray value in that field (e.g. left by an old column shift)
+  // must not flip a normal entry's sign.
+  const ids = new Set((data.ledger || []).map(l => String(l.transaction_id)));
   (data.ledger || []).forEach(l => {
-    const isReversal = String(l.reversal_of || "").length > 8;
+    const isReversal = !!l.reversal_of && ids.has(String(l.reversal_of));
     const amt = Number(l.amount_ugx || 0) * (isReversal ? -1 : 1);
     const c = normCat(l.category);
     if (cashIn.includes(c)) inflow += amt;
@@ -383,6 +387,7 @@ function Overview({ data }) {
   const activeBirds = (data.batches || []).filter(b => b.status === "Active").reduce((s, b) => s + Number(b.current_active_quantity || 0), 0);
   const pendingCount = ledger.filter(l => l.verification_state === "Pending").length;
   const cash = computeCash(data);
+  const cashInList = listCfg((data.config || {}).CashInCategories, "Revenue,member contribution");
   const valuations = (data.batches || []).map(batchValuation);
   const unrealized = Math.round(valuations.reduce((s, v) => s + v.unrealized, 0));
   const birdsValue = Math.round(valuations.reduce((s, v) => s + v.value, 0));
@@ -411,7 +416,7 @@ function Overview({ data }) {
                 <td>{new Date(l.timestamp).toLocaleDateString()}</td>
                 <td>{l.category}</td>
                 <td>{l.description}</td>
-                <td className={"amount " + (["Revenue"].includes(l.category) ? "pos" : "neg")}>{fmtUgx(l.amount_ugx)}</td>
+                <td className={"amount " + (cashInList.includes(normCat(l.category)) ? "pos" : "neg")}>{fmtUgx(l.amount_ugx)}</td>
                 <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
               </tr>
             ))}
