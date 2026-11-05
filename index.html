@@ -94,6 +94,47 @@ function fmtUgx(n) {
   return "UGX " + v.toLocaleString("en-UG");
 }
 
+// ---- Cash at hand & unrealized profit -------------------------------
+// Cash at hand = opening balance + money in - money out, from the Ledger.
+// Which categories count as "in" or "out" is owner-configurable (Settings →
+// CashInCategories / CashOutCategories) because categories like "Investment"
+// can mean either, and non-cash items like AssetLoss (a bird dying) must
+// never reduce cash. Reversal entries subtract instead of add.
+function normCat(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
+function listCfg(v, fallback) {
+  const raw = (v === undefined || v === null || v === "") ? fallback : v;
+  return String(raw).split(",").map(normCat).filter(Boolean);
+}
+function computeCash(data) {
+  const cfg = data.config || {};
+  const cashIn = listCfg(cfg.CashInCategories, "Revenue,member contribution");
+  const cashOut = listCfg(cfg.CashOutCategories, "Expenditure,Investment");
+  const opening = Number(cfg.OpeningCashUgx || 0);
+  let inflow = 0, outflow = 0;
+  (data.ledger || []).forEach(l => {
+    const isReversal = String(l.reversal_of || "").length > 8;
+    const amt = Number(l.amount_ugx || 0) * (isReversal ? -1 : 1);
+    const c = normCat(l.category);
+    if (cashIn.includes(c)) inflow += amt;
+    else if (cashOut.includes(c)) outflow += amt;
+  });
+  const openingSet = !(cfg.OpeningCashUgx === undefined || cfg.OpeningCashUgx === null || cfg.OpeningCashUgx === "");
+  return { opening, inflow, outflow, cash: opening + inflow - outflow, openingSet };
+}
+// Value of the birds still alive in a batch, vs what those birds cost.
+// estimated_asset_value_ugx holds the batch's value at full strength; both it
+// and the purchase cost are scaled by the share of birds still alive, so
+// deaths never create a phantom gain, and an unedited batch shows 0 profit.
+function batchValuation(b) {
+  const initial = Number(b.initial_quantity || 0);
+  const active = Math.max(0, Math.min(initial, Number(b.current_active_quantity || 0)));
+  if (!initial || active === 0 || b.status !== "Active") return { active: 0, value: 0, basis: 0, unrealized: 0 };
+  const share = active / initial;
+  const value = Number(b.estimated_asset_value_ugx || 0) * share;
+  const basis = Number(b.purchase_cost_ugx || 0) * share;
+  return { active, value, basis, unrealized: value - basis };
+}
+
 function fmtSyncTime(ts) {
   if (!ts) return "an earlier session";
   const d = new Date(ts);
@@ -341,15 +382,25 @@ function Overview({ data }) {
   const expenditure = sumBy("Expenditure") + sumBy("AssetLoss");
   const activeBirds = (data.batches || []).filter(b => b.status === "Active").reduce((s, b) => s + Number(b.current_active_quantity || 0), 0);
   const pendingCount = ledger.filter(l => l.verification_state === "Pending").length;
+  const cash = computeCash(data);
+  const valuations = (data.batches || []).map(batchValuation);
+  const unrealized = Math.round(valuations.reduce((s, v) => s + v.unrealized, 0));
+  const birdsValue = Math.round(valuations.reduce((s, v) => s + v.value, 0));
 
   return (
     <div>
       <div className="grid">
+        <div className="card"><div className="stat-label">Cash at Hand</div><div className="stat-value mono">{fmtUgx(cash.cash)}</div></div>
+        <div className="card"><div className="stat-label">Unrealized Profit</div><div className="stat-value mono" style={{color: unrealized >= 0 ? "var(--success)" : "var(--danger)"}}>{fmtUgx(unrealized)}</div></div>
         <div className="card"><div className="stat-label">Total Share Capital</div><div className="stat-value mono">{fmtUgx(totalCapital)}</div></div>
         <div className="card"><div className="stat-label">Revenue Recorded</div><div className="stat-value mono">{fmtUgx(revenue)}</div></div>
         <div className="card"><div className="stat-label">Expenditure &amp; Losses</div><div className="stat-value mono">{fmtUgx(expenditure)}</div></div>
         <div className="card"><div className="stat-label">Active Birds</div><div className="stat-value mono">{activeBirds}</div></div>
       </div>
+      <p style={{fontSize:12,color:"var(--text-muted)",margin:"-6px 0 16px"}}>
+        Cash at hand = opening balance {fmtUgx(cash.opening)} + money in {fmtUgx(cash.inflow)} − money out {fmtUgx(cash.outflow)}, from the Ledger. Unrealized profit = what the birds still alive are worth now ({fmtUgx(birdsValue)}) minus what those birds cost; it only becomes real profit when they are sold.
+        {!cash.openingSet && " Opening balance isn't set yet — the owner can set OpeningCashUgx in Settings."}
+      </p>
       <div className="card">
         <div className="section-title">Recent Ledger Activity</div>
         <table>
@@ -610,6 +661,19 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
   const [logForm, setLogForm] = useState({ batchId: "", eventType: "", quantityAffected: "", notes: "", eventDate: "" });
   const eventTypes = (data.config.HealthEventTypes || "").split(",");
 
+  const [valueEditId, setValueEditId] = useState(null);
+  const [perBird, setPerBird] = useState("");
+  const saveValue = async (b) => {
+    const each = Number(perBird);
+    if (!Number.isFinite(each) || each < 0) return;
+    const newEst = Math.round(each * Number(b.initial_quantity || 0));
+    await doAction(
+      { action: "updateBatch", ownerPassword, ownerName: "Owner", batchId: b.batch_id, fields: { estimated_asset_value_ugx: newEst }, reason: "Value per bird set to " + each },
+      (prev) => ({ ...prev, batches: prev.batches.map(x => x.batch_id === b.batch_id ? { ...x, estimated_asset_value_ugx: newEst } : x) })
+    );
+    setValueEditId(null);
+  };
+
   const addBatch = async () => {
     await doAction({ action: "addBatch", ownerPassword, ownerName: "Owner", label: form.label, initialQuantity: Number(form.initialQuantity), purchaseCostUgx: Number(form.purchaseCostUgx), startDate: form.startDate || undefined });
     setForm({ label: "", initialQuantity: "", purchaseCostUgx: "", startDate: "" });
@@ -626,7 +690,7 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
       <div className="card">
         <div className="section-title">Batches</div>
         <table>
-          <thead><tr><th>Batch</th><th>Started</th><th>Initial</th><th>Active now</th><th>Cost</th><th>Est. value</th><th>Status</th></tr></thead>
+          <thead><tr><th>Batch</th><th>Started</th><th>Initial</th><th>Active now</th><th>Cost</th><th>Value now</th><th>Status</th></tr></thead>
           <tbody>
             {(data.batches || []).map(b => (
               <tr key={b.batch_id}>
@@ -635,13 +699,29 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
                 <td>{b.initial_quantity}</td>
                 <td>{b.current_active_quantity}</td>
                 <td className="amount">{fmtUgx(b.purchase_cost_ugx)}</td>
-                <td className="amount">{fmtUgx(b.estimated_asset_value_ugx)}</td>
+                <td className="amount">
+                  {valueEditId === b.batch_id ? (
+                    <span>
+                      <input type="number" value={perBird} onChange={e => setPerBird(e.target.value)} placeholder="UGX per bird" style={{width:110}} />{" "}
+                      <button className="btn gold" onClick={() => saveValue(b)}>Save</button>{" "}
+                      <button className="btn ghost" onClick={() => setValueEditId(null)}>Cancel</button>
+                    </span>
+                  ) : (
+                    <span>
+                      {fmtUgx(Math.round(batchValuation(b).value))}
+                      {isOwner && <button className="btn ghost" style={{marginLeft:6}} onClick={() => { setValueEditId(b.batch_id); setPerBird(String(Math.round(Number(b.estimated_asset_value_ugx || 0) / Math.max(1, Number(b.initial_quantity || 1))))); }}>Set per bird</button>}
+                    </span>
+                  )}
+                </td>
                 <td>{b.status}</td>
               </tr>
             ))}
             {(data.batches || []).length === 0 && <tr><td colSpan="7" className="empty">No batches yet.</td></tr>}
           </tbody>
         </table>
+        <p style={{fontSize:12,color:"var(--text-muted)",marginTop:10}}>
+          Value now = what the birds still alive are worth today. The owner sets a value per bird (it starts at what you paid); deaths and sales reduce the total automatically.
+        </p>
       </div>
 
       <div className="card">
@@ -1026,6 +1106,9 @@ function Settings({ data, session, isOwner, ownerPassword, setOwnerPassword, doA
                 <option value="LedgerCategories">LedgerCategories</option>
                 <option value="HealthEventTypes">HealthEventTypes</option>
                 <option value="Roles">Roles</option>
+                <option value="OpeningCashUgx">OpeningCashUgx (cash on hand before the Ledger)</option>
+                <option value="CashInCategories">CashInCategories (money coming in)</option>
+                <option value="CashOutCategories">CashOutCategories (money going out)</option>
               </select>
             </div>
             <div className="field"><label>Value (comma-separated)</label><input value={newCatValue} onChange={e => setNewCatValue(e.target.value)} /></div>
