@@ -100,10 +100,20 @@ function fmtUgx(n) {
 // CashInCategories / CashOutCategories) because categories like "Investment"
 // can mean either, and non-cash items like AssetLoss (a bird dying) must
 // never reduce cash. Reversal entries subtract instead of add.
+const inflightActions = new Set();
 function normCat(s) { return String(s == null ? "" : s).trim().toLowerCase(); }
 function listCfg(v, fallback) {
   const raw = (v === undefined || v === null || v === "") ? fallback : v;
   return String(raw).split(",").map(normCat).filter(Boolean);
+}
+// Each ledger row with a signed amount: a reversal (a row pointing at a real
+// transaction in this ledger) counts negative so it cancels the original.
+function signedLedger(ledger) {
+  const ids = new Set((ledger || []).map(l => String(l.transaction_id)));
+  return (ledger || []).map(l => {
+    const rev = !!l.reversal_of && ids.has(String(l.reversal_of));
+    return Object.assign({}, l, { _rev: rev, _amt: Number(l.amount_ugx || 0) * (rev ? -1 : 1) });
+  });
 }
 function computeCash(data) {
   const cfg = data.config || {};
@@ -111,13 +121,8 @@ function computeCash(data) {
   const cashOut = listCfg(cfg.CashOutCategories, "Expenditure,Investment");
   const opening = Number(cfg.OpeningCashUgx || 0);
   let inflow = 0, outflow = 0;
-  // A row only counts as a reversal if it points at a real transaction in the
-  // ledger. A stray value in that field (e.g. left by an old column shift)
-  // must not flip a normal entry's sign.
-  const ids = new Set((data.ledger || []).map(l => String(l.transaction_id)));
-  (data.ledger || []).forEach(l => {
-    const isReversal = !!l.reversal_of && ids.has(String(l.reversal_of));
-    const amt = Number(l.amount_ugx || 0) * (isReversal ? -1 : 1);
+  signedLedger(data.ledger).forEach(l => {
+    const amt = l._amt;
     const c = normCat(l.category);
     if (cashIn.includes(c)) inflow += amt;
     else if (cashOut.includes(c)) outflow += amt;
@@ -240,6 +245,9 @@ function App() {
   // that's what was making every "Fix" feel slow (write + full re-download,
   // each a couple of seconds on Apps Script, happening back to back).
   const doAction = async (payload, optimisticUpdater) => {
+    const key = JSON.stringify(payload);
+    if (inflightActions.has(key)) return; // double-tap of the same request while it is still saving
+    inflightActions.add(key);
     try {
       const res = await callApi(Object.assign({ sessionToken: session ? session.token : "" }, payload));
       if (optimisticUpdater) setData(prev => prev ? optimisticUpdater(prev) : prev);
@@ -253,6 +261,8 @@ function App() {
         showToast(String(e.message || e), true);
       }
       throw e;
+    } finally {
+      inflightActions.delete(key);
     }
   };
 
@@ -381,7 +391,8 @@ function Login({ onLoggedIn, showToast, toast }) {
 function Overview({ data }) {
   const totalCapital = (data.members || []).filter(m => m.status === "Active").reduce((s, m) => s + Number(m.share_capital_ugx || 0), 0);
   const ledger = data.ledger || [];
-  const sumBy = (cat) => ledger.filter(l => l.category === cat).reduce((s, l) => s + Number(l.amount_ugx || 0), 0);
+  const signedAll = signedLedger(ledger);
+  const sumBy = (cat) => signedAll.filter(l => l.category === cat).reduce((s, l) => s + l._amt, 0);
   const revenue = sumBy("Revenue");
   const expenditure = sumBy("Expenditure") + sumBy("AssetLoss");
   const activeBirds = (data.batches || []).filter(b => b.status === "Active").reduce((s, b) => s + Number(b.current_active_quantity || 0), 0);
@@ -411,12 +422,12 @@ function Overview({ data }) {
         <table>
           <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Amount</th><th>Status</th></tr></thead>
           <tbody>
-            {ledger.slice(-8).reverse().map(l => (
+            {signedAll.slice(-8).reverse().map(l => (
               <tr key={l.transaction_id}>
                 <td>{new Date(l.timestamp).toLocaleDateString()}</td>
                 <td>{l.category}</td>
                 <td>{l.description}</td>
-                <td className={"amount " + (cashInList.includes(normCat(l.category)) ? "pos" : "neg")}>{fmtUgx(l.amount_ugx)}</td>
+                <td className={"amount " + ((cashInList.includes(normCat(l.category)) !== l._rev) ? "pos" : "neg")}>{fmtUgx(l.amount_ugx)}</td>
                 <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
               </tr>
             ))}
@@ -556,6 +567,17 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
 
   const verify = (id) => doAction({ action: "verifyTransaction", ownerPassword, ownerName: "Owner", transactionId: id });
 
+  // A mistaken entry is never deleted (the ledger is append-only). Reversing
+  // adds an offsetting entry that cancels it everywhere on the dashboard.
+  const ledgerIds = new Set((data.ledger || []).map(x => String(x.transaction_id)));
+  const isRev = (x) => !!x.reversal_of && ledgerIds.has(String(x.reversal_of));
+  const reversedIds = new Set((data.ledger || []).filter(isRev).map(x => String(x.reversal_of)));
+  const reverse = async (l) => {
+    const reason = window.prompt("Reverse this entry?\n" + l.description + " — UGX " + l.amount_ugx + "\n\nReason (kept in the audit log):", "Duplicate entry");
+    if (reason === null) return;
+    await doAction({ action: "reverseTransaction", ownerPassword, ownerName: "Owner", transactionId: l.transaction_id, reason: reason });
+  };
+
   const [fixingId, setFixingId] = useState(null);
   const [fixMemberId, setFixMemberId] = useState("");
   const saveFix = async (transactionId) => {
@@ -649,7 +671,14 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
                   </td>
                   <td className="amount">{fmtUgx(l.amount_ugx)}</td>
                   <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
-                  {isOwner && <td>{l.verification_state === "Pending" && <button className="btn ghost" onClick={() => verify(l.transaction_id)}>Verify</button>}</td>}
+                  {isOwner && <td>
+                    {reversedIds.has(String(l.transaction_id))
+                      ? <span className="stamp Rejected">REVERSED</span>
+                      : <span>
+                          {l.verification_state === "Pending" && <button className="btn ghost" onClick={() => verify(l.transaction_id)}>Verify</button>}{" "}
+                          {!isRev(l) && <button className="btn ghost" onClick={() => reverse(l)}>Reverse</button>}
+                        </span>}
+                  </td>}
                 </tr>
               );
             })}
@@ -671,6 +700,8 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
   const saveValue = async (b) => {
     const each = Number(perBird);
     if (!Number.isFinite(each) || each < 0) return;
+    const initialQty = Math.max(1, Number(b.initial_quantity || 1));
+    if (Math.round(Number(b.estimated_asset_value_ugx || 0) / initialQty) === each) { setValueEditId(null); return; } // unchanged
     const newEst = Math.round(each * Number(b.initial_quantity || 0));
     await doAction(
       { action: "updateBatch", ownerPassword, ownerName: "Owner", batchId: b.batch_id, fields: { estimated_asset_value_ugx: newEst }, reason: "Value per bird set to " + each },
@@ -775,12 +806,14 @@ function Reports({ data }) {
   const dailyNotes = data.dailyNotes || [];
 
   // --- Per-batch ROI ---
+  const signedAll = signedLedger(ledger);
   const batchReports = batches.map(b => {
-    const batchLedger = ledger.filter(l => l.related_batch_id === b.batch_id);
-    const revenue = batchLedger.filter(l => l.category === "Revenue").reduce((s, l) => s + Number(l.amount_ugx || 0), 0);
-    const expenditure = batchLedger.filter(l => l.category === "Expenditure" || l.category === "AssetLoss").reduce((s, l) => s + Number(l.amount_ugx || 0), 0);
+    const batchLedger = signedAll.filter(l => l.related_batch_id === b.batch_id);
+    const revenue = batchLedger.filter(l => l.category === "Revenue").reduce((s, l) => s + l._amt, 0);
+    const expenditure = batchLedger.filter(l => l.category === "Expenditure" || l.category === "AssetLoss").reduce((s, l) => s + l._amt, 0);
     const totalCost = Number(b.purchase_cost_ugx || 0) + expenditure;
-    const netPosition = revenue + Number(b.estimated_asset_value_ugx || 0) - totalCost;
+    // Only birds still alive have value; dead or sold birds are already a cost.
+    const netPosition = revenue + Math.round(batchValuation(b).value) - totalCost;
     const roiPct = totalCost > 0 ? (netPosition / totalCost) * 100 : 0;
 
     const logs = healthLog.filter(l => l.batch_id === b.batch_id);
@@ -797,11 +830,11 @@ function Reports({ data }) {
 
   // --- Monthly P&L trend ---
   const monthly = {};
-  ledger.forEach(l => {
+  signedAll.forEach(l => {
     const month = new Date(l.timestamp).toISOString().slice(0, 7); // YYYY-MM
     if (!monthly[month]) monthly[month] = { revenue: 0, expenditure: 0 };
-    if (l.category === "Revenue") monthly[month].revenue += Number(l.amount_ugx || 0);
-    if (l.category === "Expenditure" || l.category === "AssetLoss") monthly[month].expenditure += Number(l.amount_ugx || 0);
+    if (l.category === "Revenue") monthly[month].revenue += l._amt;
+    if (l.category === "Expenditure" || l.category === "AssetLoss") monthly[month].expenditure += l._amt;
   });
   const months = Object.keys(monthly).sort();
 
@@ -810,7 +843,7 @@ function Reports({ data }) {
       <div className="card">
         <div className="section-title">Batch Performance</div>
         <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
-          Net position = revenue + current asset value − (purchase cost + recorded expenditure/losses). ROI is net position over total cost.
+          Net position = revenue + value of the birds still alive − (purchase cost + recorded expenditure/losses). Birds that died or were sold no longer count as value. ROI is net position over total cost.
         </p>
         <table>
           <thead><tr><th>Batch</th><th>Revenue</th><th>Total Cost</th><th>Net</th><th>ROI</th><th>Mortality</th><th>Feed/bird</th><th>Eggs (total)</th></tr></thead>
