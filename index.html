@@ -109,10 +109,13 @@ function listCfg(v, fallback) {
 // Each ledger row with a signed amount: a reversal (a row pointing at a real
 // transaction in this ledger) counts negative so it cancels the original.
 function signedLedger(ledger) {
-  const ids = new Set((ledger || []).map(l => String(l.transaction_id)));
+  const byId = {};
+  (ledger || []).forEach(l => { byId[String(l.transaction_id)] = l; });
   return (ledger || []).map(l => {
-    const rev = !!l.reversal_of && ids.has(String(l.reversal_of));
-    return Object.assign({}, l, { _rev: rev, _amt: Number(l.amount_ugx || 0) * (rev ? -1 : 1) });
+    const orig = l.reversal_of ? byId[String(l.reversal_of)] : null;
+    const rev = !!orig;
+    // _ts: a reversal belongs to the same month as the entry it cancels.
+    return Object.assign({}, l, { _rev: rev, _amt: Number(l.amount_ugx || 0) * (rev ? -1 : 1), _ts: rev ? orig.timestamp : l.timestamp });
   });
 }
 function computeCash(data) {
@@ -831,7 +834,7 @@ function Reports({ data }) {
   // --- Monthly P&L trend ---
   const monthly = {};
   signedAll.forEach(l => {
-    const month = new Date(l.timestamp).toISOString().slice(0, 7); // YYYY-MM
+    const month = new Date(l._ts).toISOString().slice(0, 7); // YYYY-MM
     if (!monthly[month]) monthly[month] = { revenue: 0, expenditure: 0 };
     if (l.category === "Revenue") monthly[month].revenue += l._amt;
     if (l.category === "Expenditure" || l.category === "AssetLoss") monthly[month].expenditure += l._amt;
@@ -866,7 +869,7 @@ function Reports({ data }) {
       </div>
 
       <div className="card">
-        <div className="section-title">Monthly Cash Flow</div>
+        <div className="section-title">Monthly Income &amp; Spending</div>
         <table>
           <thead><tr><th>Month</th><th>Revenue</th><th>Expenditure &amp; Losses</th><th>Net</th></tr></thead>
           <tbody>
