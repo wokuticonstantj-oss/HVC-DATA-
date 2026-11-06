@@ -140,11 +140,22 @@ function computeCash(data) {
 function batchValuation(b) {
   const initial = Number(b.initial_quantity || 0);
   const active = Math.max(0, Math.min(initial, Number(b.current_active_quantity || 0)));
-  if (!initial || active === 0 || b.status !== "Active") return { active: 0, value: 0, basis: 0, unrealized: 0 };
+  if (!initial || active === 0 || b.status !== "Active") return { active: 0, value: 0, basis: 0, unrealized: 0, outdated: false };
   const share = active / initial;
-  const value = Number(b.estimated_asset_value_ugx || 0) * share;
   const basis = Number(b.purchase_cost_ugx || 0) * share;
-  return { active, value, basis, unrealized: value - basis };
+  const cocks = Number(b.cocks_alive || 0), hens = Number(b.hens_alive || 0);
+  const counted = cocks + hens;
+  let value, outdated = false;
+  if (counted > 0) {
+    // Owner valued cocks and hens separately. If birds died or were sold since,
+    // keep the batch's average value per bird until it is re-valued.
+    const avg = (cocks * Number(b.cock_value_ugx || 0) + hens * Number(b.hen_value_ugx || 0)) / counted;
+    value = active * avg;
+    outdated = counted !== active;
+  } else {
+    value = Number(b.estimated_asset_value_ugx || 0) * share;
+  }
+  return { active, value, basis, unrealized: value - basis, outdated };
 }
 
 function fmtSyncTime(ts) {
@@ -399,7 +410,8 @@ function Overview({ data }) {
   const revenue = sumBy("Revenue");
   const expenditure = sumBy("Expenditure") + sumBy("AssetLoss");
   const activeBirds = (data.batches || []).filter(b => b.status === "Active").reduce((s, b) => s + Number(b.current_active_quantity || 0), 0);
-  const pendingCount = ledger.filter(l => l.verification_state === "Pending").length;
+  const reversedIdsOv = new Set(signedLedger(ledger).filter(l => l._rev).map(l => String(l.reversal_of)));
+  const pendingCount = ledger.filter(l => l.verification_state === "Pending" && !reversedIdsOv.has(String(l.transaction_id))).length;
   const cash = computeCash(data);
   const cashInList = listCfg((data.config || {}).CashInCategories, "Revenue,member contribution");
   const valuations = (data.batches || []).map(batchValuation);
@@ -431,7 +443,7 @@ function Overview({ data }) {
                 <td>{l.category}</td>
                 <td>{l.description}</td>
                 <td className={"amount " + ((cashInList.includes(normCat(l.category)) !== l._rev) ? "pos" : "neg")}>{fmtUgx(l.amount_ugx)}</td>
-                <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
+                <td>{reversedIdsOv.has(String(l.transaction_id)) ? <span className="stamp Rejected">REVERSED</span> : <span className={"stamp " + l.verification_state}>{l.verification_state}</span>}</td>
               </tr>
             ))}
             {ledger.length === 0 && <tr><td colSpan="5" className="empty">No transactions yet.</td></tr>}
@@ -673,7 +685,7 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
                     )}
                   </td>
                   <td className="amount">{fmtUgx(l.amount_ugx)}</td>
-                  <td><span className={"stamp " + l.verification_state}>{l.verification_state}</span></td>
+                  <td>{reversedIds.has(String(l.transaction_id)) ? <span className="stamp Rejected">REVERSED</span> : <span className={"stamp " + l.verification_state}>{l.verification_state}</span>}</td>
                   {isOwner && <td>
                     {reversedIds.has(String(l.transaction_id))
                       ? <span className="stamp Rejected">REVERSED</span>
@@ -699,16 +711,27 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
   const eventTypes = (data.config.HealthEventTypes || "").split(",");
 
   const [valueEditId, setValueEditId] = useState(null);
-  const [perBird, setPerBird] = useState("");
+  const [vf, setVf] = useState({ cocks: "", hens: "", cockVal: "", henVal: "" });
+  const openValue = (b) => {
+    const cocks = Number(b.cocks_alive || 0), hens = Number(b.hens_alive || 0);
+    const fallback = Math.round(Number(b.estimated_asset_value_ugx || 0) / Math.max(1, Number(b.initial_quantity || 1)));
+    setVf(cocks + hens > 0
+      ? { cocks: String(cocks), hens: String(hens), cockVal: String(b.cock_value_ugx || ""), henVal: String(b.hen_value_ugx || "") }
+      : { cocks: "", hens: "", cockVal: String(fallback), henVal: String(fallback) });
+    setValueEditId(b.batch_id);
+  };
   const saveValue = async (b) => {
-    const each = Number(perBird);
-    if (!Number.isFinite(each) || each < 0) return;
-    const initialQty = Math.max(1, Number(b.initial_quantity || 1));
-    if (Math.round(Number(b.estimated_asset_value_ugx || 0) / initialQty) === each) { setValueEditId(null); return; } // unchanged
-    const newEst = Math.round(each * Number(b.initial_quantity || 0));
+    const alive = batchValuation(b).active;
+    if (alive <= 0) return;
+    const cocks = Number(vf.cocks || 0), hens = Number(vf.hens || 0);
+    const cv = Number(vf.cockVal || 0), hv = Number(vf.henVal || 0);
+    if (![cocks, hens, cv, hv].every(n => Number.isFinite(n) && n >= 0) || cocks % 1 || hens % 1) { window.alert("Enter whole numbers (0 or more)."); return; }
+    if (cocks + hens !== alive) { window.alert("Cocks + hens must equal the birds alive now (" + alive + ")."); return; }
+    const avg = (cocks * cv + hens * hv) / alive;
+    const fields = { cocks_alive: cocks, hens_alive: hens, cock_value_ugx: cv, hen_value_ugx: hv, estimated_asset_value_ugx: Math.round(avg * Number(b.initial_quantity || 0)) };
     await doAction(
-      { action: "updateBatch", ownerPassword, ownerName: "Owner", batchId: b.batch_id, fields: { estimated_asset_value_ugx: newEst }, reason: "Value per bird set to " + each },
-      (prev) => ({ ...prev, batches: prev.batches.map(x => x.batch_id === b.batch_id ? { ...x, estimated_asset_value_ugx: newEst } : x) })
+      { action: "updateBatch", ownerPassword, ownerName: "Owner", batchId: b.batch_id, fields, reason: "Valued: " + cocks + " cocks @ " + cv + ", " + hens + " hens @ " + hv },
+      (prev) => ({ ...prev, batches: prev.batches.map(x => x.batch_id === b.batch_id ? { ...x, ...fields } : x) })
     );
     setValueEditId(null);
   };
@@ -739,18 +762,12 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
                 <td>{b.current_active_quantity}</td>
                 <td className="amount">{fmtUgx(b.purchase_cost_ugx)}</td>
                 <td className="amount">
-                  {valueEditId === b.batch_id ? (
-                    <span>
-                      <input type="number" value={perBird} onChange={e => setPerBird(e.target.value)} placeholder="UGX per bird" style={{width:110}} />{" "}
-                      <button className="btn gold" onClick={() => saveValue(b)}>Save</button>{" "}
-                      <button className="btn ghost" onClick={() => setValueEditId(null)}>Cancel</button>
-                    </span>
-                  ) : (
-                    <span>
-                      {fmtUgx(Math.round(batchValuation(b).value))}
-                      {isOwner && <button className="btn ghost" style={{marginLeft:6}} onClick={() => { setValueEditId(b.batch_id); setPerBird(String(Math.round(Number(b.estimated_asset_value_ugx || 0) / Math.max(1, Number(b.initial_quantity || 1))))); }}>Set per bird</button>}
-                    </span>
+                  <div>{fmtUgx(Math.round(batchValuation(b).value))}</div>
+                  {batchValuation(b).active > 0 && (Number(b.cocks_alive || 0) + Number(b.hens_alive || 0)) > 0 && (
+                    <div style={{fontSize:11,color:"var(--text-muted)"}}>{Number(b.cocks_alive || 0)} cock @ {Number(b.cock_value_ugx || 0).toLocaleString()} · {Number(b.hens_alive || 0)} hen @ {Number(b.hen_value_ugx || 0).toLocaleString()}</div>
                   )}
+                  {batchValuation(b).outdated && <div style={{fontSize:11,color:"var(--danger)"}}>birds changed — re-value</div>}
+                  {isOwner && batchValuation(b).active > 0 && <button className="btn ghost" style={{marginTop:4}} onClick={() => openValue(b)}>Set values</button>}
                 </td>
                 <td>{b.status}</td>
               </tr>
@@ -759,9 +776,29 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
           </tbody>
         </table>
         <p style={{fontSize:12,color:"var(--text-muted)",marginTop:10}}>
-          Value now = what the birds still alive are worth today. The owner sets a value per bird (it starts at what you paid); deaths and sales reduce the total automatically.
+          Value now = what the birds still alive are worth today. The owner says how many cocks and hens are alive and what each sells for. If birds die or are sold later, the value follows the batch's average per bird until you re-value.
         </p>
       </div>
+
+      {valueEditId && (() => {
+        const b = (data.batches || []).find(x => x.batch_id === valueEditId);
+        if (!b) return null;
+        const alive = batchValuation(b).active;
+        return (
+          <div className="card">
+            <div className="section-title">Value birds — {b.label}</div>
+            <p style={{fontSize:12,color:"var(--text-muted)"}}>Birds alive now: {alive}. Cocks + hens must add up to {alive}. Use what each bird would sell for today.</p>
+            <div className="form-grid">
+              <div className="field"><label>Cocks alive</label><input type="number" value={vf.cocks} onChange={e => setVf({...vf, cocks: e.target.value})} /></div>
+              <div className="field"><label>Value per cock (UGX)</label><input type="number" value={vf.cockVal} onChange={e => setVf({...vf, cockVal: e.target.value})} /></div>
+              <div className="field"><label>Hens alive</label><input type="number" value={vf.hens} onChange={e => setVf({...vf, hens: e.target.value})} /></div>
+              <div className="field"><label>Value per hen (UGX)</label><input type="number" value={vf.henVal} onChange={e => setVf({...vf, henVal: e.target.value})} /></div>
+            </div>
+            <button className="btn gold" onClick={() => saveValue(b)}>Save values</button>{" "}
+            <button className="btn ghost" onClick={() => setValueEditId(null)}>Cancel</button>
+          </div>
+        );
+      })()}
 
       <div className="card">
         <div className="section-title">New Batch</div>
@@ -822,13 +859,14 @@ function Reports({ data }) {
     const logs = healthLog.filter(l => l.batch_id === b.batch_id);
     const mortality = logs.filter(l => l.event_type === "Mortality").reduce((s, l) => s + Number(l.quantity_affected || 0), 0);
     const mortalityRate = Number(b.initial_quantity) > 0 ? (mortality / Number(b.initial_quantity)) * 100 : 0;
+    const stolen = logs.filter(l => l.event_type === "Theft" || l.event_type === "Loss").reduce((s, l) => s + Number(l.quantity_affected || 0), 0);
 
     const notes = dailyNotes.filter(n => n.batch_id === b.batch_id);
     const totalFeedCost = notes.reduce((s, n) => s + Number(n.feed_cost_ugx || 0), 0);
     const totalEggs = notes.reduce((s, n) => s + Number(n.eggs_produced || 0), 0);
     const feedCostPerBird = Number(b.current_active_quantity) > 0 ? totalFeedCost / Number(b.current_active_quantity) : 0;
 
-    return { ...b, revenue, totalCost, netPosition, roiPct, mortality, mortalityRate, totalFeedCost, totalEggs, feedCostPerBird };
+    return { ...b, revenue, totalCost, netPosition, roiPct, mortality, stolen, mortalityRate, totalFeedCost, totalEggs, feedCostPerBird };
   });
 
   // --- Monthly P&L trend ---
@@ -858,7 +896,7 @@ function Reports({ data }) {
                 <td className="amount">{fmtUgx(b.totalCost)}</td>
                 <td className={"amount " + (b.netPosition >= 0 ? "pos" : "neg")}>{fmtUgx(b.netPosition)}</td>
                 <td className={"mono " + (b.roiPct >= 0 ? "pos" : "neg")}>{b.roiPct.toFixed(1)}%</td>
-                <td className="mono">{b.mortalityRate.toFixed(1)}% ({b.mortality})</td>
+                <td className="mono">{b.mortalityRate.toFixed(1)}% ({b.mortality}){b.stolen > 0 && <div style={{fontSize:11,color:"var(--danger)"}}>+{b.stolen} stolen/lost</div>}</td>
                 <td className="amount">{fmtUgx(Math.round(b.feedCostPerBird))}</td>
                 <td className="mono">{b.totalEggs}</td>
               </tr>
