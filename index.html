@@ -409,7 +409,7 @@ function Overview({ data }) {
   const sumBy = (cat) => signedAll.filter(l => l.category === cat).reduce((s, l) => s + l._amt, 0);
   const revenue = sumBy("Revenue");
   const expenditure = sumBy("Expenditure") + sumBy("AssetLoss");
-  const activeBirds = (data.batches || []).filter(b => b.status === "Active").reduce((s, b) => s + Number(b.current_active_quantity || 0), 0);
+  const activeBirds = (data.batches || []).filter(b => b.status === "Active").reduce((s, b) => s + Math.max(0, Number(b.current_active_quantity || 0)), 0);
   const reversedIdsOv = new Set(signedLedger(ledger).filter(l => l._rev).map(l => String(l.reversal_of)));
   const pendingCount = ledger.filter(l => l.verification_state === "Pending" && !reversedIdsOv.has(String(l.transaction_id))).length;
   const cash = computeCash(data);
@@ -743,6 +743,14 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
 
   const addLog = async () => {
     if (!me || !logForm.batchId) return;
+    const reducing = ["Mortality", "Theft", "Loss", "Sale"].includes(logForm.eventType);
+    const batch = (data.batches || []).find(x => x.batch_id === logForm.batchId);
+    const qty = Number(logForm.quantityAffected || 0);
+    if (reducing && batch) {
+      const alive = Number(batch.current_active_quantity || 0);
+      if (qty <= 0) { window.alert("Enter how many birds were affected."); return; }
+      if (qty > alive) { window.alert("Only " + Math.max(0, alive) + " bird(s) are alive in " + batch.label + ". You can't log " + qty + "."); return; }
+    }
     await doAction({ action: "addHealthLog", batchId: logForm.batchId, eventType: logForm.eventType, quantityAffected: Number(logForm.quantityAffected || 0), notes: logForm.notes, eventDate: logForm.eventDate || undefined });
     setLogForm({ batchId: "", eventType: "", quantityAffected: "", notes: "", eventDate: "" });
   };
@@ -757,14 +765,16 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
             {(data.batches || []).map(b => (
               <tr key={b.batch_id}>
                 <td>{b.label}</td>
-                <td>{b.start_date}</td>
+                <td>{b.start_date ? new Date(b.start_date).toLocaleDateString() : ""}</td>
                 <td>{b.initial_quantity}</td>
-                <td>{b.current_active_quantity}</td>
+                <td>{Number(b.current_active_quantity) < 0
+                  ? <span style={{color:"var(--danger)"}}>{b.current_active_quantity} ⚠<div style={{fontSize:11}}>more losses logged than birds bought — see Recent Health Events</div></span>
+                  : b.current_active_quantity}</td>
                 <td className="amount">{fmtUgx(b.purchase_cost_ugx)}</td>
                 <td className="amount">
                   <div>{fmtUgx(Math.round(batchValuation(b).value))}</div>
                   {batchValuation(b).active > 0 && (Number(b.cocks_alive || 0) + Number(b.hens_alive || 0)) > 0 && (
-                    <div style={{fontSize:11,color:"var(--text-muted)"}}>{Number(b.cocks_alive || 0)} cock @ {Number(b.cock_value_ugx || 0).toLocaleString()} · {Number(b.hens_alive || 0)} hen @ {Number(b.hen_value_ugx || 0).toLocaleString()}</div>
+                    <div style={{fontSize:11,color:"var(--text-muted)"}}>{Number(b.cocks_alive || 0)} {Number(b.cocks_alive || 0) === 1 ? "cock" : "cocks"} @ {Number(b.cock_value_ugx || 0).toLocaleString()} · {Number(b.hens_alive || 0)} {Number(b.hens_alive || 0) === 1 ? "hen" : "hens"} @ {Number(b.hen_value_ugx || 0).toLocaleString()}</div>
                   )}
                   {batchValuation(b).outdated && <div style={{fontSize:11,color:"var(--danger)"}}>birds changed — re-value</div>}
                   {isOwner && batchValuation(b).active > 0 && <button className="btn ghost" style={{marginTop:4}} onClick={() => openValue(b)}>Set values</button>}
@@ -834,6 +844,28 @@ function Batches({ data, me, isOwner, ownerPassword, doAction }) {
           <div className="field"><label>Notes</label><input value={logForm.notes} onChange={e => setLogForm({...logForm, notes: e.target.value})} /></div>
         </div>
         <button className="btn gold" disabled={!me || !logForm.batchId || !logForm.eventType} onClick={addLog}>Log event</button>
+      </div>
+
+      <div className="card">
+        <div className="section-title">Recent Health Events</div>
+        <table>
+          <thead><tr><th>Date</th><th>Batch</th><th>Event</th><th>Qty</th><th>Notes</th></tr></thead>
+          <tbody>
+            {[...(data.healthLog || [])].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 12).map(l => {
+              const bt = (data.batches || []).find(x => x.batch_id === l.batch_id);
+              return (
+                <tr key={l.log_id}>
+                  <td>{new Date(l.timestamp).toLocaleDateString()}</td>
+                  <td>{bt ? bt.label : "—"}</td>
+                  <td>{l.event_type}</td>
+                  <td>{l.quantity_affected}</td>
+                  <td>{l.notes}</td>
+                </tr>
+              );
+            })}
+            {(data.healthLog || []).length === 0 && <tr><td colSpan="5" className="empty">No health events yet.</td></tr>}
+          </tbody>
+        </table>
       </div>
     </div>
   );
