@@ -115,8 +115,44 @@ function signedLedger(ledger) {
     const orig = l.reversal_of ? byId[String(l.reversal_of)] : null;
     const rev = !!orig;
     // _ts: a reversal belongs to the same month as the entry it cancels.
-    return Object.assign({}, l, { _rev: rev, _amt: Number(l.amount_ugx || 0) * (rev ? -1 : 1), _ts: rev ? orig.timestamp : l.timestamp });
+    return Object.assign({}, l, { _rev: rev, _amt: Number(l.amount_ugx || 0) * (rev ? -1 : 1), _ts: rev ? orig.timestamp : l.timestamp, _fund: rev ? orig.fund : l.fund });
   });
+}
+// ---- Funds (Fund Allocation Policy) ---------------------------------
+const FUND_NAMES = ["Investment", "Reserve", "Knowledge", "Operations"];
+function fundSplit(cfg) {
+  const raw = (cfg && cfg.FundSplit) || "Investment:50,Reserve:20,Knowledge:10,Operations:20";
+  const m = {};
+  String(raw).split(",").forEach(p => { const kv = p.split(":"); if (kv[0]) m[kv[0].trim()] = Number(kv[1]) || 0; });
+  const total = FUND_NAMES.reduce((s, n) => s + (m[n] || 0), 0) || 1;
+  const out = {};
+  FUND_NAMES.forEach(n => { out[n] = (m[n] || 0) / total; });
+  return out;
+}
+// All money in (opening balance + contributions + revenue) is divided by the
+// split; each spending row is charged to its tagged fund. "All" = share
+// payout, charged to every fund in proportion. Untagged spending is reported
+// separately so the funds always reconcile to Cash at Hand.
+function computeFunds(data) {
+  const cfg = data.config || {};
+  const split = fundSplit(cfg);
+  const cashIn = listCfg(cfg.CashInCategories, "Revenue,member contribution");
+  const cashOut = listCfg(cfg.CashOutCategories, "Expenditure,Investment");
+  let money = Number(cfg.OpeningCashUgx || 0);
+  const spent = {};
+  FUND_NAMES.forEach(n => { spent[n] = 0; });
+  let untagged = 0;
+  signedLedger(data.ledger).forEach(l => {
+    const c = normCat(l.category);
+    if (cashIn.includes(c)) money += l._amt;
+    else if (cashOut.includes(c)) {
+      if (FUND_NAMES.includes(l._fund)) spent[l._fund] += l._amt;
+      else if (l._fund === "All") FUND_NAMES.forEach(n => { spent[n] += l._amt * split[n]; });
+      else untagged += l._amt;
+    }
+  });
+  const rows = FUND_NAMES.map(n => ({ name: n, pct: split[n] * 100, allocated: money * split[n], spent: spent[n], balance: money * split[n] - spent[n] }));
+  return { rows, untagged, money };
 }
 function computeCash(data) {
   const cfg = data.config || {};
@@ -297,6 +333,7 @@ function App() {
     ["ledger", "Financial Ledger"],
     ["batches", "Poultry Batches"],
     ["reports", "Reports"],
+    ["funds", "Funds"],
     ["sharelots", "Share Lots"],
     ["ideas", "Ideas"],
     ["settings", "Settings"]
@@ -334,6 +371,7 @@ function App() {
         {view === "ledger" && <Ledger data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "batches" && <Batches data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "reports" && <Reports data={data} />}
+        {view === "funds" && <Funds data={data} />}
         {view === "sharelots" && <ShareLots data={data} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "ideas" && <Ideas data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "settings" && <Settings data={data} session={session} isOwner={isOwner} ownerPassword={ownerPassword} setOwnerPassword={setOwnerPassword} doAction={doAction} />}
@@ -572,16 +610,21 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
 
 function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
   const categories = (data.config.LedgerCategories || "").split(",");
-  const [form, setForm] = useState({ category: categories[0] || "", amountUgx: "", description: "", relatedMemberId: "", transactionDate: "" });
+  const [form, setForm] = useState({ category: categories[0] || "", amountUgx: "", description: "", relatedMemberId: "", transactionDate: "", fund: "", relatedBatchId: "" });
 
   const submit = async () => {
     if (!me) return;
-    await doAction({ action: "addLedgerEntry", category: form.category, amountUgx: Number(form.amountUgx), description: form.description, relatedMemberId: form.relatedMemberId || undefined, transactionDate: form.transactionDate || undefined });
-    setForm({ category: categories[0] || "", amountUgx: "", description: "", relatedMemberId: "", transactionDate: "" });
+    await doAction({ action: "addLedgerEntry", category: form.category, amountUgx: Number(form.amountUgx), description: form.description, relatedMemberId: form.relatedMemberId || undefined, transactionDate: form.transactionDate || undefined, fund: form.fund || undefined, relatedBatchId: form.relatedBatchId || undefined });
+    setForm({ category: categories[0] || "", amountUgx: "", description: "", relatedMemberId: "", transactionDate: "", fund: "", relatedBatchId: "" });
   };
 
   const verify = (id) => doAction({ action: "verifyTransaction", ownerPassword, ownerName: "Owner", transactionId: id });
 
+  const cashInSet = listCfg((data.config || {}).CashInCategories, "Revenue,member contribution");
+  const setFund = (l, fund) => doAction(
+    { action: "setLedgerFund", ownerPassword, ownerName: "Owner", transactionId: l.transaction_id, fund: fund, reason: "Tagged via Ledger table" },
+    (prev) => ({ ...prev, ledger: prev.ledger.map(x => x.transaction_id === l.transaction_id ? { ...x, fund: fund } : x) })
+  );
   // A mistaken entry is never deleted (the ledger is append-only). Reversing
   // adds an offsetting entry that cancels it everywhere on the dashboard.
   const ledgerIds = new Set((data.ledger || []).map(x => String(x.transaction_id)));
@@ -634,6 +677,22 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
           </div>
           <div className="field"><label>When did this actually happen? (leave blank for today)</label><input type="date" value={form.transactionDate} onChange={e => setForm({...form, transactionDate: e.target.value})} /></div>
         </div>
+        <div className="field"><label>Fund (for spending: what is it for?)</label>
+          <select value={form.fund} onChange={e => setForm({...form, fund: e.target.value})}>
+            <option value="">— none (money coming in) —</option>
+            <option value="Investment">Investment (birds, equipment)</option>
+            <option value="Operations">Operations (feed, medicine, fees)</option>
+            <option value="Knowledge">Knowledge (training, pilots)</option>
+            <option value="Reserve">Reserve (losses, emergencies)</option>
+            <option value="All">All funds (share payout)</option>
+          </select>
+        </div>
+        <div className="field"><label>Related batch (optional — for feed, medicine or sales, not for buying the birds)</label>
+          <select value={form.relatedBatchId} onChange={e => setForm({...form, relatedBatchId: e.target.value})}>
+            <option value="">— none —</option>
+            {(data.batches || []).map(b => <option key={b.batch_id} value={b.batch_id}>{b.label}</option>)}
+          </select>
+        </div>
         <div className="field"><label>Description</label><input value={form.description} onChange={e => setForm({...form, description: e.target.value})} /></div>
         <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6}}>
           "By" always shows whoever is logged in submitting this — that's an accountability record, not who the money is from. If you're entering someone else's contribution (e.g. the Chairman logging the MD's cash), set "Contributing/related member" above so the ledger shows whose money it actually is.
@@ -643,7 +702,7 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
       <div className="card">
         <div className="section-title">All Transactions</div>
         <table>
-          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Entered by</th><th>Contribution from</th><th>Amount</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
+          <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Entered by</th><th>Contribution from</th><th>Fund</th><th>Amount</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
           <tbody>
             {(data.ledger || []).slice().reverse().map(l => {
               const recorder = (data.members || []).find(m => m.member_id === l.recorded_by);
@@ -665,7 +724,7 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
                     )}
                   </td>
                   <td>{l.category}</td>
-                  <td>{l.description}</td>
+                  <td>{l.description}{l.related_batch_id && <div style={{fontSize:11,color:"var(--text-muted)"}}>Batch: {((data.batches || []).find(b => b.batch_id === l.related_batch_id) || {}).label || ""}</div>}</td>
                   <td>{recorder ? recorder.full_name : l.recorded_by}</td>
                   <td>
                     {fixingId === l.transaction_id ? (
@@ -684,6 +743,9 @@ function Ledger({ data, me, isOwner, ownerPassword, doAction }) {
                       </span>
                     )}
                   </td>
+                  <td>{isOwner && !isRev(l) && !cashInSet.includes(normCat(l.category))
+                    ? <select value={l.fund || ""} onChange={e => setFund(l, e.target.value)} style={{maxWidth:105}}><option value="">— tag —</option><option value="Investment">Investment</option><option value="Operations">Operations</option><option value="Knowledge">Knowledge</option><option value="Reserve">Reserve</option><option value="All">All (payout)</option></select>
+                    : (l.fund || "")}</td>
                   <td className="amount">{fmtUgx(l.amount_ugx)}</td>
                   <td>{reversedIds.has(String(l.transaction_id)) ? <span className="stamp Rejected">REVERSED</span> : <span className={"stamp " + l.verification_state}>{l.verification_state}</span>}</td>
                   {isOwner && <td>
@@ -1024,6 +1086,35 @@ function Ideas({ data, me, isOwner, ownerPassword, doAction }) {
   );
 }
 
+function Funds({ data }) {
+  const f = computeFunds(data);
+  const cash = computeCash(data).cash;
+  const ratified = String((data.config || {}).FundPolicyRatified || "").toLowerCase() === "yes";
+  const sumBal = Math.round(f.rows.reduce((s, r) => s + r.balance, 0));
+  return (
+    <div>
+      {!ratified && <div style={{background:"#f6ecd0",border:"1px solid #e0cf9f",borderRadius:8,padding:"10px 12px",fontSize:13,marginBottom:12}}>Proposed split — the Board has not adopted the Fund Allocation Policy yet.</div>}
+      <div className="grid">
+        {f.rows.map(r => (
+          <div className="card" key={r.name}>
+            <div className="stat-label">{r.name} · {Math.round(r.pct)}%</div>
+            <div className="stat-value mono" style={{color: r.balance < 0 ? "var(--danger)" : undefined}}>{fmtUgx(Math.round(r.balance))}</div>
+            <div style={{fontSize:11,color:"var(--text-muted)",marginTop:4}}>Allocated {fmtUgx(Math.round(r.allocated))} · Spent {fmtUgx(Math.round(r.spent))}</div>
+            {r.balance < 0 && <div style={{fontSize:11,color:"var(--danger)"}}>Overspent — needs a Board decision</div>}
+          </div>
+        ))}
+      </div>
+      <p style={{fontSize:12,color:"var(--text-muted)"}}>
+        Funds {fmtUgx(sumBal)} − untagged spending {fmtUgx(Math.round(f.untagged))} = Cash at Hand {fmtUgx(cash)}.
+        {f.untagged > 0 && " Some spending has no fund yet: tag it in the Financial Ledger (Fund column)."}
+      </p>
+      <p style={{fontSize:12,color:"var(--text-muted)"}}>
+        Funds are labels on the same cash, not separate accounts. Money in (opening balance, contributions, sales) is divided by the split; if the split changes, all balances are restated.
+      </p>
+    </div>
+  );
+}
+
 function ShareLots({ data, isOwner, ownerPassword, doAction }) {
   const activeMembers = (data.members || []).filter(m => m.status === "Active");
   const lots = data.shareLots || [];
@@ -1220,6 +1311,8 @@ function Settings({ data, session, isOwner, ownerPassword, setOwnerPassword, doA
                 <option value="OpeningCashUgx">OpeningCashUgx (cash on hand before the Ledger)</option>
                 <option value="CashInCategories">CashInCategories (money coming in)</option>
                 <option value="CashOutCategories">CashOutCategories (money going out)</option>
+                <option value="FundSplit">FundSplit (e.g. Investment:50,Reserve:20,Knowledge:10,Operations:20)</option>
+                <option value="FundPolicyRatified">FundPolicyRatified (type yes once the Board adopts it)</option>
               </select>
             </div>
             <div className="field"><label>Value (comma-separated)</label><input value={newCatValue} onChange={e => setNewCatValue(e.target.value)} /></div>
