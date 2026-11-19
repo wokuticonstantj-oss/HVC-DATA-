@@ -334,6 +334,7 @@ function App() {
     ["batches", "Poultry Batches"],
     ["reports", "Reports"],
     ["funds", "Funds"],
+    ["withdrawals", "Withdrawals"],
     ["sharelots", "Share Lots"],
     ["ideas", "Ideas"],
     ["settings", "Settings"]
@@ -372,6 +373,7 @@ function App() {
         {view === "batches" && <Batches data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "reports" && <Reports data={data} />}
         {view === "funds" && <Funds data={data} />}
+        {view === "withdrawals" && <Withdrawals data={data} me={me} doAction={doAction} />}
         {view === "sharelots" && <ShareLots data={data} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "ideas" && <Ideas data={data} me={me} isOwner={isOwner} ownerPassword={ownerPassword} doAction={doAction} />}
         {view === "settings" && <Settings data={data} session={session} isOwner={isOwner} ownerPassword={ownerPassword} setOwnerPassword={setOwnerPassword} doAction={doAction} />}
@@ -505,6 +507,18 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
   const [lastIssuedPin, setLastIssuedPin] = useState(null);
   const roles = (data.config.Roles || "").split(",");
   const statuses = ["Active", "Suspended", "Archived"];
+  const participations = ["Active", "On leave", "Inactive"];
+  // Register helpers: last recorded contribution per member, and who counts
+  // toward quorum (declared Active participation, account status Active).
+  const lastContribution = (memberId) => {
+    const ts = (data.ledger || []).filter(l => String(l.related_member_id) === String(memberId) && normCat(l.category) === "member contribution")
+      .map(l => new Date(l.timestamp).getTime()).filter(t => !isNaN(t));
+    return ts.length ? Math.max(...ts) : null;
+  };
+  const sixMonthsAgo = Date.now() - 183 * 24 * 3600 * 1000;
+  const roster = (data.members || []).filter(m => m.status !== "Archived");
+  const declaredActive = roster.filter(m => m.status === "Active" && (m.participation || "Active") === "Active").length;
+  const quiet = roster.filter(m => { const t = lastContribution(m.member_id); return !t || t < sixMonthsAgo; });
 
   const submit = async () => {
     const res = await doAction({ action: "addMember", ownerPassword, ownerName: "Owner", fullName: form.fullName, role: form.role, shareCapitalUgx: Number(form.shareCapitalUgx), pin: form.pin || undefined });
@@ -519,7 +533,7 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
 
   const startEdit = (m) => {
     setEditingId(m.member_id);
-    setEditForm({ full_name: m.full_name, role: m.role, status: m.status });
+    setEditForm({ full_name: m.full_name, role: m.role, status: m.status, participation: m.participation || "Active", contact: m.contact || "", contact2: m.contact2 || "", status_note: m.status_note || "" });
   };
 
   const saveEdit = async (memberId) => {
@@ -531,7 +545,11 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
       fields: {
         full_name: editForm.full_name,
         role: editForm.role,
-        status: editForm.status
+        status: editForm.status,
+        participation: editForm.participation,
+        contact: editForm.contact,
+        contact2: editForm.contact2,
+        status_note: editForm.status_note
       },
       reason: "Corrected via Members edit"
     });
@@ -545,12 +563,17 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
         {isOwner && <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6,marginBottom:14}}>
           Made a mistake entering someone's name or role? Tap Edit here, or set status to Archived to remove a duplicate from equity calculations without deleting its history. Capital is managed in the Share Lots tab, not here — it's a derived total of each member's lots.
         </p>}
+        {isOwner && <p style={{fontSize:12,color:"var(--text-muted)",marginTop:-6}}>
+          Declared active: <b>{declaredActive}</b> of {roster.length} members · quorum needs at least 2 ({declaredActive >= 2 ? "met" : "NOT met"}).
+          {quiet.length > 0 && " No contribution recorded in the last 6 months: " + quiet.map(m => m.full_name).join(", ") + ". Contributions are not the only kind of activity, so confirm before starting the check-in steps."}
+        </p>}
         <table>
           <thead><tr><th>Name</th><th>Role</th><th>Capital</th><th>Equity</th><th>Status</th>{isOwner && <th></th>}</tr></thead>
           <tbody>
             {(data.members || []).map(m => (
               editingId === m.member_id ? (
-                <tr key={m.member_id}>
+                <React.Fragment key={m.member_id}>
+                <tr>
                   <td><input value={editForm.full_name} onChange={e => setEditForm({...editForm, full_name: e.target.value})} /></td>
                   <td>
                     <select value={editForm.role} onChange={e => setEditForm({...editForm, role: e.target.value})}>
@@ -569,13 +592,26 @@ function Members({ data, isOwner, ownerPassword, doAction }) {
                     <button className="btn ghost" onClick={() => setEditingId(null)}>Cancel</button>
                   </td>
                 </tr>
+                <tr><td colSpan="6">
+                  <div className="form-grid">
+                    <div className="field"><label>Participation (policy status)</label>
+                      <select value={editForm.participation} onChange={e => setEditForm({...editForm, participation: e.target.value})}>
+                        {participations.map(x => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </div>
+                    <div className="field"><label>Board resolution / note for this status</label><input value={editForm.status_note} onChange={e => setEditForm({...editForm, status_note: e.target.value})} placeholder="e.g. Resolution of 2026-12-01" /></div>
+                    <div className="field"><label>Phone / contact</label><input value={editForm.contact} onChange={e => setEditForm({...editForm, contact: e.target.value})} /></div>
+                    <div className="field"><label>Second contact (WhatsApp, email)</label><input value={editForm.contact2} onChange={e => setEditForm({...editForm, contact2: e.target.value})} /></div>
+                  </div>
+                </td></tr>
+                </React.Fragment>
               ) : (
                 <tr key={m.member_id}>
                   <td>{m.full_name}</td>
                   <td><span className="badge-role">{m.role}</span></td>
                   <td className="amount">{m.share_capital_ugx === null ? "—" : fmtUgx(m.share_capital_ugx)}</td>
                   <td className="mono">{m.equity_bps === null ? "—" : (Number(m.equity_bps) / 100).toFixed(2) + "%"}</td>
-                  <td>{m.status}</td>
+                  <td>{m.status}{isOwner && <div style={{fontSize:11,color:"var(--text-muted)"}}>{m.participation || "Active"} · last contribution {lastContribution(m.member_id) ? new Date(lastContribution(m.member_id)).toLocaleDateString() : "none"}{m.status_note ? " · " + m.status_note : ""}</div>}</td>
                   {isOwner && <td><button className="btn ghost" onClick={() => startEdit(m)}>Edit</button> <button className="btn ghost" onClick={() => resetPin(m)}>Reset PIN</button></td>}
                 </tr>
               )
@@ -1115,6 +1151,99 @@ function Funds({ data }) {
   );
 }
 
+function Withdrawals({ data, me, doAction }) {
+  const cfg = data.config || {};
+  const needed = Number(cfg.WithdrawalApprovalsNeeded || 2);
+  const names = String(cfg.WithdrawalApprovers || "").split(",").map(normCat).filter(Boolean);
+  const approverIds = (data.members || []).filter(m => m.status === "Active" && (names.length ? names.includes(normCat(m.full_name)) : (m.role === "Chairman" || m.role === "ManagingDirector"))).map(m => m.member_id);
+  const iAmApprover = approverIds.includes(me);
+  const nameOf = (id) => ((data.members || []).find(m => m.member_id === id) || {}).full_name || "—";
+  const [form, setForm] = useState({ amount: "", purpose: "", fund: "Operations" });
+  const [pin, setPin] = useState("");
+  const [ex, setEx] = useState({ id: null, ref: "", fee: "" });
+  const now = Date.now();
+  const rows = [...(data.withdrawals || [])].sort((a, b) => new Date(b.requested_at) - new Date(a.requested_at));
+  const parse = (w) => { try { return JSON.parse(w.approvals || "[]"); } catch (e) { return []; } };
+  const stateOf = (w) => (["Pending", "Approved"].includes(w.status) && w.expires_at && now > new Date(w.expires_at).getTime()) ? "Expired" : w.status;
+  const outstanding = rows.filter(w => w.status === "Executed").reduce((s, w) => s + Number(w.amount_ugx || 0), 0);
+  const cash = computeCash(data).cash;
+  const small = { fontSize: 12, color: "var(--text-muted)" };
+
+  const request = async () => {
+    await doAction({ action: "requestWithdrawal", amountUgx: Number(form.amount), purpose: form.purpose, fund: form.fund });
+    setForm({ amount: "", purpose: "", fund: "Operations" });
+  };
+  const decide = async (w, decision) => {
+    if (!pin) { window.alert("Enter your PIN first."); return; }
+    let reason;
+    if (decision === "reject") { reason = window.prompt("Reason for rejecting:"); if (!reason) return; }
+    await doAction({ action: "decideWithdrawal", requestId: w.request_id, decision: decision, pin: pin, reason: reason });
+    setPin("");
+  };
+  const execute = async (w) => {
+    await doAction({ action: "executeWithdrawal", requestId: w.request_id, momoReference: ex.ref, feeUgx: Number(ex.fee || 0) });
+    setEx({ id: null, ref: "", fee: "" });
+  };
+  const settle = async (w) => {
+    const note = window.prompt("Settle: confirm the cash is fully accounted for (spent and recorded in the Ledger, or returned). Note:", "All spent and recorded");
+    if (note === null) return;
+    await doAction({ action: "settleWithdrawal", requestId: w.request_id, note: note });
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="section-title">Withdrawals</div>
+        <p style={small}>Each withdrawal needs a request and {needed} different people's approval (the requester counts if they are an approver). This records and checks; it cannot lock the mobile money wallet itself.</p>
+        <p style={small}>Cash at Hand {fmtUgx(cash)} − cash withdrawn but not yet settled {fmtUgx(outstanding)} = expected wallet balance <b>{fmtUgx(cash - outstanding)}</b>. Compare it with your real mobile money balance.</p>
+      </div>
+      <div className="card">
+        <div className="section-title">Request a withdrawal</div>
+        <div className="form-grid">
+          <div className="field"><label>Amount (UGX)</label><input type="number" value={form.amount} onChange={e => setForm({...form, amount: e.target.value})} /></div>
+          <div className="field"><label>Fund</label>
+            <select value={form.fund} onChange={e => setForm({...form, fund: e.target.value})}>{FUND_NAMES.map(f => <option key={f} value={f}>{f}</option>)}</select>
+          </div>
+          <div className="field"><label>What is it for?</label><input value={form.purpose} onChange={e => setForm({...form, purpose: e.target.value})} /></div>
+        </div>
+        <button className="btn gold" disabled={!form.amount || !form.purpose} onClick={request}>Send request</button>
+      </div>
+      <div className="card">
+        <div className="section-title">Requests</div>
+        {iAmApprover && <div className="field"><label>Your PIN (needed to approve or reject)</label><input type="password" inputMode="numeric" value={pin} onChange={e => setPin(e.target.value)} /></div>}
+        {rows.length === 0 && <p style={small}>No requests yet.</p>}
+        {rows.map(w => {
+          const ap = parse(w);
+          const st = stateOf(w);
+          return (
+            <div key={w.request_id} style={{borderTop:"1px solid #e6e1d3",padding:"10px 0"}}>
+              <div><b>{fmtUgx(w.amount_ugx)}</b> · {w.fund} · <b>{st}</b></div>
+              <div style={small}>{w.purpose} — requested by {nameOf(w.requested_by)}, {new Date(w.requested_at).toLocaleDateString()}</div>
+              <div style={small}>Approvals {ap.length} of {needed}: {ap.map(a => nameOf(a.member_id)).join(", ") || "none yet"}</div>
+              {w.status === "Rejected" && <div style={small}>Rejected by {nameOf(w.rejected_by)}: {w.reject_reason}</div>}
+              {(w.status === "Executed" || w.status === "Settled") && <div style={small}>Withdrawn by {nameOf(w.executed_by)}, ref {w.momo_reference}, fee {fmtUgx(w.fee_ugx || 0)}. Record any fee in the Ledger as Operations spending.</div>}
+              {w.status === "Settled" && <div style={small}>Settled: {w.settle_note}</div>}
+              {st === "Pending" && iAmApprover && !ap.some(a => a.member_id === me) && (
+                <div style={{marginTop:6}}><button className="btn gold" onClick={() => decide(w, "approve")}>Approve</button>{" "}<button className="btn ghost" onClick={() => decide(w, "reject")}>Reject</button></div>
+              )}
+              {st === "Approved" && (me === w.requested_by || iAmApprover) && (ex.id === w.request_id ? (
+                <div style={{marginTop:6}}>
+                  <div className="field"><label>Mobile money transaction reference</label><input value={ex.ref} onChange={e => setEx({...ex, ref: e.target.value})} /></div>
+                  <div className="field"><label>Withdrawal fee (UGX)</label><input type="number" value={ex.fee} onChange={e => setEx({...ex, fee: e.target.value})} /></div>
+                  <button className="btn gold" disabled={!ex.ref} onClick={() => execute(w)}>Save</button>{" "}<button className="btn ghost" onClick={() => setEx({ id: null, ref: "", fee: "" })}>Cancel</button>
+                </div>
+              ) : (
+                <div style={{marginTop:6}}><button className="btn ghost" onClick={() => setEx({ id: w.request_id, ref: "", fee: "" })}>I have withdrawn it</button></div>
+              ))}
+              {w.status === "Executed" && iAmApprover && <div style={{marginTop:6}}><button className="btn ghost" onClick={() => settle(w)}>Mark settled</button></div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function ShareLots({ data, isOwner, ownerPassword, doAction }) {
   const activeMembers = (data.members || []).filter(m => m.status === "Active");
   const lots = data.shareLots || [];
@@ -1312,6 +1441,8 @@ function Settings({ data, session, isOwner, ownerPassword, setOwnerPassword, doA
                 <option value="CashInCategories">CashInCategories (money coming in)</option>
                 <option value="CashOutCategories">CashOutCategories (money going out)</option>
                 <option value="FundSplit">FundSplit (e.g. Investment:50,Reserve:20,Knowledge:10,Operations:20)</option>
+                <option value="WithdrawalApprovers">WithdrawalApprovers (names, comma-separated; blank = Chairman and Managing Director)</option>
+                <option value="WithdrawalApprovalsNeeded">WithdrawalApprovalsNeeded (default 2)</option>
                 <option value="FundPolicyRatified">FundPolicyRatified (type yes once the Board adopts it)</option>
               </select>
             </div>
