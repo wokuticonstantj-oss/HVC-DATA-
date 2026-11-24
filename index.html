@@ -87,7 +87,7 @@ const { useState, useEffect, useCallback, useMemo } = React;
 // =========================================================================
 // CONFIGURE THIS: your deployed Apps Script Web App URL (ends in /exec)
 // =========================================================================
-const GAS_URL = "https://script.google.com/macros/s/AKfycbxeBkVesEqqiWbysuit8OQxXkPV7ifUAaUMTRXRoi8oix_EMDhLmWae3IRcpZxcGNM_Zg/exec";
+const GAS_URL = "https://bbed5123c35e8c.app.lhr.life/api/hvc";
 
 function fmtUgx(n) {
   const v = Number(n) || 0;
@@ -1180,8 +1180,7 @@ function Withdrawals({ data, me, doAction }) {
     await doAction({ action: "decideWithdrawal", requestId: w.request_id, decision: decision, pin: pin, reason: reason });
     setPin("");
   };
-  const execute = async (w) => {
-    await doAction({ action: "executeWithdrawal", requestId: w.request_id, momoReference: ex.ref, feeUgx: Number(ex.fee || 0) });
+  const execute = async (w) => { const phone = window.prompt("Recipient MoMo number (default = MTN Sandbox test):", "46733123450"); if (!phone) return; await doAction({ action: "executeWithdrawal", requestId: w.request_id, recipientPhone: phone, momoReference: "AUTO_MOMO", feeUgx: Number(ex.fee || 0) });
     setEx({ id: null, ref: "", fee: "" });
   };
   const settle = async (w) => {
